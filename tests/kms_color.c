@@ -725,6 +725,392 @@ static void test_pipe_limited_range_ctm(data_t *data,
 }
 #endif
 
+static void clear_lut_data(kms_colorop_t *colorops[])
+{
+	int i;
+
+	for (i = 0; colorops[i]; i++) {
+		if (colorops[i]->type != KMS_COLOROP_CUSTOM_LUT1D)
+			continue;
+
+		if (colorops[i]->custom_lut1d_info.lut)
+			free(colorops[i]->custom_lut1d_info.lut);
+	}
+}
+
+static void prepare_lut_data(data_t *data, kms_colorop_t *colorops[])
+{
+	int i;
+
+	for (i = 0; colorops[i]; i++) {
+		uint64_t hwlut_caps = 0;
+		segment_data_t *segment_info;
+
+		if (colorops[i]->type != KMS_COLOROP_CUSTOM_LUT1D_MULTSEG)
+			continue;
+
+		hwlut_caps = igt_colorop_get_prop(&data->display, colorops[i]->colorop, IGT_COLOROP_HW_CAPS);
+		segment_info = get_segment_data(data->drm_fd, hwlut_caps);
+
+		igt_info("Lut size (%s): %d\n", colorops[i]->name, segment_info->entries_count);
+
+		colorops[i]->custom_lut1d_info.lut_size = segment_info->entries_count;
+		colorops[i]->custom_lut1d_info.lut =
+			malloc(sizeof(struct drm_color_lut_32) * colorops[i]->custom_lut1d_info.lut_size);
+		igt_assert(colorops[i]->custom_lut1d_info.lut);
+
+		switch (colorops[i]->custom_lut1d_info.lut_type) {
+			case KMS_COLOROP_CUSTOM_LUT1D_ZERO:
+				create_zero_lut(segment_info, colorops[i]->custom_lut1d_info.lut);
+				break;
+			case KMS_COLOROP_CUSTOM_LUT1D_LINEAR:
+				create_unity_lut(segment_info, colorops[i]->custom_lut1d_info.lut);
+				break;
+			case KMS_COLOROP_CUSTOM_LUT1D_MAX:
+			default:
+				create_max_lut(segment_info, colorops[i]->custom_lut1d_info.lut);
+		}
+
+		clear_segment_data(segment_info);
+	}
+}
+
+static bool ctm_colorop_only(kms_colorop_t *colorops[])
+{
+	int i;
+
+	for (i = 0; colorops[i]; i++)
+		if (colorops[i]->type != KMS_COLOROP_CTM_3X3)
+			return false;
+	return true;
+}
+
+static bool can_use_colorop(igt_display_t *display, igt_colorop_t *colorop, kms_colorop_t *desired)
+{
+
+        switch (desired->type) {
+        case KMS_COLOROP_ENUMERATED_LUT1D:
+                if (igt_colorop_get_prop(display, colorop, IGT_COLOROP_TYPE) == DRM_COLOROP_1D_CURVE &&
+                    igt_colorop_try_prop_enum(colorop, IGT_COLOROP_CURVE_1D_TYPE, kms_colorop_lut1d_tf_names[desired->enumerated_lut1d_info.tf]))
+                        return true;
+                return false;
+        case KMS_COLOROP_CTM_3X3:
+                return (igt_colorop_get_prop(display, colorop, IGT_COLOROP_TYPE) == DRM_COLOROP_CTM_3X3);
+        case KMS_COLOROP_CTM_3X4:
+                return (igt_colorop_get_prop(display, colorop, IGT_COLOROP_TYPE) == DRM_COLOROP_CTM_3X4);
+        case KMS_COLOROP_CUSTOM_LUT1D:
+                if (igt_colorop_get_prop(display, colorop, IGT_COLOROP_TYPE) == DRM_COLOROP_1D_LUT)
+                        return true;
+                return false;
+        case KMS_COLOROP_CUSTOM_LUT1D_MULTSEG:
+	{
+                return (igt_colorop_get_prop(display, colorop, IGT_COLOROP_TYPE) == DRM_COLOROP_1D_LUT_MULTSEG);
+	}
+        case KMS_COLOROP_MULTIPLIER:
+                return (igt_colorop_get_prop(display, colorop, IGT_COLOROP_TYPE) == DRM_COLOROP_MULTIPLIER);
+        case KMS_COLOROP_LUT3D:
+                return (igt_colorop_get_prop(display, colorop, IGT_COLOROP_TYPE) == DRM_COLOROP_3D_LUT);
+        default:
+                return false;
+        }
+}
+
+
+/**
+ * Iterate color pipeline that begins with colorop and try to map
+ * colorops[] to it.
+ */
+static bool map_to_pipeline(igt_display_t *display,
+                            igt_colorop_t *colorop,
+                            kms_colorop_t *colorops[])
+{
+        igt_colorop_t *next = colorop;
+        kms_colorop_t *current_op;
+        int i = 0;
+        int prop_val = 0;
+
+        current_op = colorops[i];
+        i++;
+        igt_require(current_op);
+
+        while (next) {
+                if (can_use_colorop(display, next, current_op)) {
+                        current_op->colorop = next;
+                        current_op = colorops[i];
+                        i++;
+                        if (!current_op)
+                                break;
+                }
+                prop_val = igt_colorop_get_prop(display, next,
+                                                IGT_COLOROP_NEXT);
+                next = igt_find_colorop(display, prop_val);
+        }
+
+        if (current_op) {
+                /* we failed to map the pipeline */
+
+                /* clean up colorops[i].colorop mappings */
+                for(i = 0, current_op = colorops[0]; current_op; current_op = colorops[i++])
+                        current_op->colorop = NULL;
+
+                return false;
+        }
+
+        return true;
+}
+
+
+static igt_colorop_t *get_color_pipeline(igt_display_t *display,
+                                         igt_plane_t *plane,
+                                         kms_colorop_t *colorops[])
+{
+        igt_colorop_t *colorop = NULL;
+        int i;
+
+        /* go through all color pipelines */
+        for (i = 0; i < plane->num_color_pipelines; ++i) {
+		igt_critical("color pipelines id %d\n", plane->color_pipelines[i]->id);
+                if (map_to_pipeline(display, plane->color_pipelines[i], colorops)) {
+                        colorop = plane->color_pipelines[i];
+                        break;
+                }
+        }
+
+        return colorop;
+}
+
+
+static void set_color_pipeline_bypass(igt_plane_t *plane)
+{
+        igt_plane_set_prop_enum(plane, IGT_PLANE_COLOR_PIPELINE, "Bypass");
+}
+
+static void fill_custom_1dlut(igt_display_t *display, kms_colorop_t *colorop)
+{
+        uint64_t lut_size = igt_colorop_get_prop(display, colorop->colorop, IGT_COLOROP_SIZE);
+        igt_pixel_t pixel;
+        float index;
+        int i;
+
+        for (i = 0; i < lut_size; i++) {
+                index = i / (float) lut_size;
+
+                pixel.r = index;
+                pixel.g = index;
+                pixel.b = index;
+
+                colorop->transform(&pixel);
+
+                colorop->lut1d->lut[i].red = pixel.r * 0xffff;
+                colorop->lut1d->lut[i].green = pixel.g * 0xffff;
+                colorop->lut1d->lut[i].blue = pixel.b * 0xffff;
+        }
+}
+
+static void configure_3dlut(igt_display_t *display, kms_colorop_t *colorop,
+                                  struct drm_mode_3dlut_mode *modes,
+                                  uint64_t num_mode) {
+        uint64_t lut_size = 0;
+        uint64_t i;
+        igt_3dlut_norm_t *igt_3dlut;
+
+        /* Convert 3DLUT floating points to u16 required by colorop API */
+        lut_size = colorop->lut3d_mode.lut_size * colorop->lut3d_mode.lut_size * colorop->lut3d_mode.lut_size;
+        igt_3dlut = (igt_3dlut_norm_t *) malloc(sizeof(struct drm_color_lut) * lut_size);
+        for (i = 0; i < lut_size; i++) {
+                struct igt_color_lut_float *lut_f = &colorop->lut3d->lut[i];
+                igt_3dlut->lut[i].red = round (lut_f->red * 0xFFFF);
+                igt_3dlut->lut[i].green = round (lut_f->green * 0xFFFF);
+                igt_3dlut->lut[i].blue = round (lut_f->blue * 0xFFFF);
+        }
+
+        /* find the exact lut mode supported by a kms_colorop_3dlut_* test */
+        for (i = 0; i < num_mode; i++)
+                if (!memcmp(&colorop->lut3d_mode, &modes[i], sizeof(struct drm_mode_3dlut_mode)))
+                        break;
+
+        igt_skip_on_f(i == num_mode, "no matching 3dlut mode\n");
+        igt_colorop_set_prop_value(colorop->colorop, IGT_COLOROP_3DLUT_MODE_INDEX, i);
+
+        lut_size = modes[i].lut_stride[0] * modes[i].lut_stride[1] * modes[i].lut_stride[2];
+        igt_colorop_set_3dlut(display, colorop->colorop, igt_3dlut, lut_size * sizeof(struct drm_color_lut));
+        free(igt_3dlut);
+}
+
+static void set_colorop(igt_display_t *display,
+                        kms_colorop_t *colorop)
+{
+        drmModePropertyBlobPtr blob = NULL;
+        struct drm_mode_3dlut_mode *modes;
+        uint64_t lut_size = 0;
+        uint64_t mult = 1;
+        uint64_t blob_id;
+
+        igt_assert(colorop->colorop);
+        igt_colorop_set_prop_value(colorop->colorop, IGT_COLOROP_BYPASS, 0);
+
+        switch (colorop->type) {
+        case KMS_COLOROP_ENUMERATED_LUT1D:
+                igt_colorop_set_prop_enum(colorop->colorop, IGT_COLOROP_CURVE_1D_TYPE, kms_colorop_lut1d_tf_names[colorop->enumerated_lut1d_info.tf]);
+                break;
+        case KMS_COLOROP_CTM_3X3:
+                igt_colorop_set_ctm_3x3(display, colorop->colorop, colorop->matrix_3x3);
+                break;
+        case KMS_COLOROP_CTM_3X4:
+                igt_colorop_set_ctm_3x4(display, colorop->colorop, colorop->matrix_3x4);
+                break;
+        case KMS_COLOROP_CUSTOM_LUT1D:
+                fill_custom_1dlut(display, colorop);
+                lut_size = igt_colorop_get_prop(display, colorop->colorop, IGT_COLOROP_SIZE);
+                igt_colorop_set_custom_1dlut(display, colorop->colorop, colorop->lut1d, lut_size * sizeof(struct drm_color_lut));
+                break;
+        case KMS_COLOROP_CUSTOM_LUT1D_MULTSEG:
+                igt_colorop_set_custom_lut_1d_multseg(display, colorop->colorop, colorop->custom_lut1d_info);
+                break;
+        case KMS_COLOROP_MULTIPLIER:
+                mult = colorop->multiplier * (mult << 32);      /* convert double to fixed number */
+                igt_colorop_set_prop_value(colorop->colorop, IGT_COLOROP_MULTIPLIER, mult);
+                break;
+        case KMS_COLOROP_LUT3D:
+                blob_id = igt_colorop_get_prop(display, colorop->colorop, IGT_COLOROP_3DLUT_MODES);
+                igt_assert(blob_id);
+                blob = drmModeGetPropertyBlob(display->drm_fd, blob_id);
+                igt_assert(blob);
+                modes = (struct drm_mode_3dlut_mode *) blob->data;
+                configure_3dlut(display, colorop, modes, blob->length / sizeof(struct drm_mode_3dlut_mode));
+                break;
+        default:
+                igt_fail(IGT_EXIT_FAILURE);
+        }
+}
+
+static void clear_colorop(igt_display_t *display, kms_colorop_t *colorop)
+{
+	igt_assert(colorop->colorop);
+	igt_colorop_set_prop_value(colorop->colorop, IGT_COLOROP_BYPASS, 1);
+
+	switch (colorop->type) {
+	case KMS_COLOROP_CTM_3X3:
+	case KMS_COLOROP_CTM_3X4:
+	case KMS_COLOROP_CUSTOM_LUT1D:
+		igt_colorop_replace_prop_blob(colorop->colorop, IGT_COLOROP_DATA, NULL, 0);
+		break;
+	case KMS_COLOROP_ENUMERATED_LUT1D:
+	case KMS_COLOROP_LUT3D:
+	default:
+		return;
+	}
+}
+
+static void clear_color_pipeline(igt_display_t *display,
+			  igt_plane_t *plane,
+			  kms_colorop_t *colorops[],
+			  igt_colorop_t *color_pipeline)
+{
+	int i;
+
+	for(i = 0; colorops[i]; i++)
+		clear_colorop(display, colorops[i]);
+}
+
+static void set_color_pipeline(igt_display_t *display,
+                               igt_plane_t *plane,
+                               kms_colorop_t *colorops[],
+                               igt_colorop_t *color_pipeline)
+{
+        igt_colorop_t *next;
+        int prop_val = 0;
+        int i;
+
+        igt_plane_set_color_pipeline(plane, color_pipeline);
+
+	/* Set everything to bypass */
+        next = color_pipeline;
+
+	while (next) {
+		igt_colorop_set_prop_value(next, IGT_COLOROP_BYPASS, 1);
+
+		prop_val = igt_colorop_get_prop(display, next,
+				IGT_COLOROP_NEXT);
+		next = igt_find_colorop(display, prop_val);
+	}
+
+        for(i = 0; colorops[i]; i++)
+                set_colorop(display, colorops[i]);
+}
+
+
+static bool test_plane_colorops(data_t *data,
+				const color_t *fb_colors,
+				const color_t *exp_colors,
+				kms_colorop_t *colorops[])
+{
+	igt_plane_t *plane = data->primary;
+	igt_output_t *output = data->output;
+	igt_display_t *display = &data->display;
+	drmModeModeInfo *mode = data->mode;
+	struct igt_fb fb;
+	bool ret;
+	igt_colorop_t *color_pipeline = get_color_pipeline(display, plane, colorops);
+	igt_crc_t crc_gamma, crc_fullcolors;
+
+	igt_output_set_pipe(output, plane->pipe->pipe);
+	mode = igt_output_get_mode(output);
+
+	/* Create a framebuffer at the size of the output. */
+	igt_assert(igt_create_fb(data->drm_fd,
+			      mode->hdisplay,
+			      mode->vdisplay,
+			      DRM_FORMAT_XRGB8888,
+			      DRM_FORMAT_MOD_LINEAR,
+			      &fb));
+	igt_plane_set_fb(plane, &fb);
+
+	/* Disable Pipe color props. */
+	disable_ctm(plane->pipe);
+	disable_degamma(plane->pipe);
+	disable_gamma(plane->pipe);
+	igt_display_commit2(display, COMMIT_ATOMIC);
+
+	set_color_pipeline_bypass(plane);
+	paint_rectangles(data, mode, exp_colors, &fb);
+	igt_plane_set_fb(plane, &fb);
+	igt_display_commit2(display, COMMIT_ATOMIC);
+	igt_wait_for_vblank(data->drm_fd,
+		display->pipes[plane->pipe->pipe].crtc_offset);
+	igt_pipe_crc_collect_crc(data->pipe_crc, &crc_fullcolors);
+
+	/*
+	 * Draw gradient colors with LUT to remap all
+	 * values to max red/green/blue.
+	 */
+	prepare_lut_data(data, colorops);
+	set_color_pipeline(display, plane, colorops, color_pipeline);
+	if (ctm_colorop_only(colorops))
+		paint_rectangles(data, mode, fb_colors, &fb);
+	else
+		paint_gradient_rectangles(data, mode, fb_colors, &fb);
+	igt_plane_set_fb(plane, &fb);
+	igt_display_commit2(display, COMMIT_ATOMIC);
+	igt_wait_for_vblank(data->drm_fd,
+			display->pipes[plane->pipe->pipe].crtc_offset);
+	igt_pipe_crc_collect_crc(data->pipe_crc, &crc_gamma);
+
+	/*
+	 * Verify that the CRC of the software computed output is
+	 * equal to the CRC of the gamma LUT transformation output.
+	 */
+	ret = igt_check_crc_equal(&crc_gamma, &crc_fullcolors);
+
+	clear_lut_data(colorops);
+	clear_color_pipeline(display, plane, colorops, color_pipeline);
+	igt_plane_set_fb(plane, NULL);
+	igt_output_set_pipe(output, PIPE_NONE);
+	igt_display_commit2(display, COMMIT_ATOMIC);
+
+	return ret;
+}
+
 static void
 prep_pipe(data_t *data, enum pipe p)
 {
