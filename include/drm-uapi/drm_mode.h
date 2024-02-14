@@ -875,6 +875,42 @@ struct drm_color_lut {
 };
 
 /**
+ * struct drm_color_lut_32 - Represents high precision lut values
+ *
+ * Creating 32 bit palette entries for better data
+ * precision. This will be required for HDR and
+ * similar color processing usecases.
+ */
+struct drm_color_lut_32 {
+	/*
+	 * Data for high precision LUTs
+	 */
+	__u32 red;
+	__u32 green;
+	__u32 blue;
+	__u32 reserved;
+};
+
+struct drm_color_lut_range {
+	/* DRM_COLOROP_1D_LUT_MULTSEG_* */
+	__u32 flags;
+	/* number of points on the curve in the segment */
+	__u16 count;
+	/* input start/end values of the segment */
+	__s32 start, end;
+	/* normalization factor. Represents 1.0 in terms of smallest step size */
+	__u32 norm_factor;
+
+	/* precision of HW LUT*/
+	struct {
+		/* Integer precision */
+		__u16 intp;
+		/* Fractional precision */
+		__u16 fracp;
+	} precision;
+};
+
+/**
  * enum drm_colorop_type - Type of color operation
  *
  *
@@ -907,6 +943,13 @@ enum drm_colorop_type {
 	 * &drm_color_ctm_3x4 struct provided via the DATA property.
 	 */
 	DRM_COLOROP_CTM_3X4,
+
+	/**
+	 * @DRM_COLOROP_1D_LUT_MULTSEG:
+	 *
+	 * A multi segmented 1D LUT
+	 */
+	DRM_COLOROP_1D_LUT_MULTSEG,
 
 	/**
 	 * @DRM_COLOROP_CTM_3X3:
