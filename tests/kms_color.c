@@ -33,6 +33,9 @@
  */
 
 #include "kms_color_helper.h"
+#include "kms_colorop.h"
+
+#define MAX_COLOROPS	5
 
 /**
  * SUBTEST: degamma
@@ -76,6 +79,20 @@
  * @ctm-matrix:         Color transformation matrix
  * @degamma-lut:        Degamma LUT
  * @gamma-lut:          Gamma LUT
+ */
+
+/**
+ * SUBTEST: plane-%s
+ * Description: Test plane color pipeline with colorops: %arg[1].
+ *
+ * arg[1]:
+ *
+ * @lut1d:		1D LUT
+ * @ctm3x3:		3X3 CTM
+ * @lut1d-ctm3x3:	1D LUT --> 3X3 CTM
+ * @ctm3x3-lut1d:	3X3 CTM --> 1D LUT
+ * @lut1d-lut1d:	1D LUT --> 1D LUT
+ * @lut1d-ctm3x3-lut1d: 1D LUT --> 3X3 CTM --> 1D LUT
  */
 
 IGT_TEST_DESCRIPTION("Test Color Features at Pipe level");
@@ -1039,7 +1056,6 @@ static void set_color_pipeline(igt_display_t *display,
                 set_colorop(display, colorops[i]);
 }
 
-
 static bool test_plane_colorops(data_t *data,
 				const color_t *fb_colors,
 				const color_t *exp_colors,
@@ -1246,6 +1262,42 @@ run_ctm_tests_for_pipe(data_t *data, enum pipe p,
 	}
 
 out:
+	test_cleanup(data);
+}
+
+static void run_plane_color_tests(data_t *data,
+				  const color_t *fb_colors,
+				  const color_t *exp_colors,
+				  kms_colorop_t *colorops[])
+{
+	enum pipe pipe;
+
+	data->color_depth = 8;
+	data->drm_format = DRM_FORMAT_XRGB8888;
+
+	for_each_pipe(&data->display, pipe) {
+		test_setup(data, pipe);
+
+		data->mode = igt_output_get_mode(data->output);
+
+		if (!pipe_output_combo_valid(data, pipe)){
+			test_cleanup(data);
+			continue;
+		}
+
+		/*
+		 * TODO: Extend the test to multiple planes?
+		 * Since, Intel planes (HDR & SDR) have different capabilities.
+		 */
+		if (!igt_plane_has_prop(data->primary, IGT_PLANE_COLOR_PIPELINE))
+			continue;
+
+		igt_dynamic_f("pipe-%s-%s",
+			      kmstest_pipe_name(pipe),
+			      igt_output_name(data->output))
+			igt_assert(test_plane_colorops(data, fb_colors, exp_colors, colorops));
+	}
+
 	test_cleanup(data);
 }
 
@@ -1535,13 +1587,91 @@ run_tests_for_pipe(data_t *data)
 		}
 	}
 
-	igt_fixture
-		igt_require(data->display.is_atomic);
+	igt_subtest_group {
+		static const color_t colors_red_to_blue[] = {
+			{ 0.0, 0.0, 1.0 },
+			{ 0.0, 1.0, 0.0 },
+			{ 0.0, 0.0, 1.0 },
+		};
+		const struct drm_color_ctm ctm_red_to_blue = { {
+			0.0, 0.0, 0.0,
+			0.0, 1.0, 0.0,
+			1.0, 0.0, 1.0
+		} };
+		kms_colorop_t lut1d_linear = {
+			.type = KMS_COLOROP_CUSTOM_LUT1D_MULTSEG,
+			.name = "Pre/Post CSC GAMMA (linear LUT)",
+			.custom_lut1d_info = {
+				.lut_type = KMS_COLOROP_CUSTOM_LUT1D_LINEAR,
+			},
+		};
+		kms_colorop_t lut1d_max = {
+			.type = KMS_COLOROP_CUSTOM_LUT1D_MULTSEG,
+			.name = "Pre/Post CSC GAMMA (max LUT)",
+			.custom_lut1d_info = {
+				.lut_type = KMS_COLOROP_CUSTOM_LUT1D_MAX,
+			},
+		};
+		kms_colorop_t ctm_3x3 = {
+			.type = KMS_COLOROP_CTM_3X3,
+			.name = "CTM 3X3 (red to blue)",
+			.matrix_3x3 = &ctm_red_to_blue,
+		};
+		struct {
+			const char *name;
+			const color_t *fb_colors;
+			const color_t *exp_colors;
+			kms_colorop_t *colorops[MAX_COLOROPS];
+		} plane_colorops_tests[] = {
+			{ .name = "lut1d",
+			  .fb_colors = colors_rgb,
+			  .exp_colors = colors_rgb,
+			  .colorops = { &lut1d_max, NULL },
+			},
+			{ .name = "ctm3x3",
+			  .fb_colors = colors_rgb,
+			  .exp_colors = colors_red_to_blue,
+			  .colorops = { &ctm_3x3, NULL },
+			},
+			{ .name = "lut1d-ctm3x3",
+			  .fb_colors = colors_rgb,
+			  .exp_colors = colors_red_to_blue,
+			  .colorops = { &lut1d_max, &ctm_3x3, NULL },
+			},
+			{ .name = "ctm3x3-lut1d",
+			  .fb_colors = colors_rgb,
+			  .exp_colors = colors_red_to_blue,
+			  .colorops = { &ctm_3x3, &lut1d_max, NULL },
+			},
+			{ .name = "lut1d-lut1d",
+			  .fb_colors = colors_rgb,
+			  .exp_colors = colors_rgb,
+			  .colorops = { &lut1d_linear, &lut1d_max, NULL },
+			},
+			{ .name = "lut1d-ctm3x3-lut1d",
+			  .fb_colors = colors_rgb,
+			  .exp_colors = colors_red_to_blue,
+			  .colorops = { &lut1d_linear, &ctm_3x3, &lut1d_max, NULL },
+			},
+		};
 
-	igt_describe("Verify that deep color works correctly");
-	igt_subtest_with_dynamic("deep-color") {
-		for_each_pipe(&data->display, pipe) {
-			run_deep_color_tests_for_pipe(data, pipe);
+		igt_fixture
+			igt_require(data->display.is_atomic);
+
+		for (i = 0; i < ARRAY_SIZE(plane_colorops_tests); i++) {
+			igt_describe_f("Test plane color pipeline with colorops: %s", plane_colorops_tests[i].name);
+			igt_subtest_with_dynamic_f("plane-%s", plane_colorops_tests[i].name)
+				run_plane_color_tests(data,
+						      plane_colorops_tests[i].fb_colors,
+						      plane_colorops_tests[i].exp_colors,
+						      plane_colorops_tests[i].colorops);
+		}
+
+		igt_describe("Verify that deep color works correctly");
+		igt_subtest_with_dynamic("deep-color") {
+			for_each_pipe(&data->display, pipe) {
+				run_deep_color_tests_for_pipe(data, pipe);
+			}
 		}
 	}
 }
