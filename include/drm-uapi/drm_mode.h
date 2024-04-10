@@ -879,6 +879,56 @@ enum drm_colorop_type {
 	DRM_COLOROP_1D_LUT,
 	DRM_COLOROP_CTM_3X4,
 	DRM_COLOROP_MULTIPLIER,
+	DRM_COLOROP_3D_LUT,
+};
+
+enum drm_colorop_interpolation_type {
+	DRM_COLOROP_TETRAHEDRAL,
+};
+
+enum drm_colorop_traversal_order {
+	DRM_COLOROP_TRAVERSAL_RGB,
+	DRM_COLOROP_TRAVERSAL_BGR,
+};
+
+struct drm_mode_3dlut_mode {
+	/**
+	 * @lut_size: 3D LUT size - can be 9, 17 or 33
+	 */
+	__u16 lut_size;
+	/**
+	 * @lut_stride: dimensions of 3D LUT. Must be larger than lut_size
+	 */
+	__u16 lut_stride[3];
+	/**
+	 * @interpolation: interpolation algorithm for 3D LUT. See drm_colorop_interpolation_type
+	 */
+	__u16 interpolation;
+	/**
+	 * @color_depth: color depth - can be 8, 10 or 12
+	 */
+	__u16 color_depth;
+	/**
+	 * @color_format: color format specifieid by fourcc values
+	 * ex. DRM_FORMAT_XRGB16161616 - color in order of RGB, each is 16bit.
+	 */
+	__u32 color_format;
+	/**
+	 * @traversal_order: RGB color placement in 3D array, lut3d[R][G][B] or lut3d[B][G][R]
+	 * ex. for a 3D array with size of 17 -
+	 * DRM_COLOROP_TRAVERSAL_RGB is traversd by
+	 *   for R in range 0..16
+	 *     for G in range 0..16
+	 *       for B in range 0..16
+	 *         color = lut3d[R][G][B]
+	 *
+	 * DRM_COLOROP_TRAVERSAL_BGR is traversd by
+	 *   for R in range 0..16
+	 *     for G in range 0..16
+	 *       for B in range 0..16
+	 *         color = lut3d[B][G][R]
+	 */
+	__u16 traversal_order;
 };
 
 /**
