@@ -3,7 +3,9 @@
  * Copyright 2023 Advanced Micro Devices, Inc.
  *
  * This file contains code adapted from Skia, which is
- * Copyright (c) 2011 Google Inc. All rights reserved.
+ * distributed under a BSD-style license which can be
+ * found at
+ * https://skia.googlesource.com/skia.git/+/refs/heads/main/LICENSE
  */
 
 #include <errno.h>
