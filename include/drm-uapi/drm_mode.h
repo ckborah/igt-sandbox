@@ -976,6 +976,19 @@ struct drm_mode_3dlut_mode {
 };
 
 /**
+ * enum drm_colorop_lut1d_interpolation_type - type of interpolation for 1D LUTs
+ */
+enum drm_colorop_lut1d_interpolation_type {
+	/**
+	 * @DRM_COLOROP_LUT1D_INTERPOLATION_LINEAR:
+	 *
+	 * Linear interpolation. Values between points of the LUT will be
+	 * linearly interpolated.
+	 */
+	DRM_COLOROP_LUT1D_INTERPOLATION_LINEAR,
+};
+
+/**
  * struct hdr_metadata_infoframe - HDR Metadata Infoframe Data.
  *
  * HDR Metadata Infoframe as per CTA 861.G spec. This is expected
