@@ -636,6 +636,32 @@ void igt_colorop_set_ctm_3x4(igt_display_t *display,
 	igt_colorop_replace_prop_blob(colorop, IGT_COLOROP_DATA, &ctm, sizeof(ctm));
 }
 
+void igt_colorop_set_ctm_3x3(igt_display_t *display,
+			     igt_colorop_t *colorop,
+			     const struct drm_color_ctm *matrix)
+{
+	struct drm_color_ctm ctm;
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(ctm.matrix); i++) {
+		if (matrix->matrix[i] < 0) {
+			ctm.matrix[i] =
+				(int64_t) (-matrix->matrix[i] *
+				((int64_t) 1L << 32));
+			ctm.matrix[i] |= 1ULL << 63;
+		} else {
+			ctm.matrix[i] =
+				(int64_t) (matrix->matrix[i] *
+				((int64_t) 1L << 32));
+		}
+		igt_debug("CTM[%d]: %llx\n", i, ctm.matrix[i]);
+	}
+
+	/* set blob property */
+	igt_colorop_replace_prop_blob(colorop, IGT_COLOROP_DATA, &ctm, sizeof(ctm));
+}
+
+
 void igt_colorop_set_custom_1dlut(igt_display_t *display,
 				  igt_colorop_t *colorop,
 				  const igt_1dlut_t *lut1d,

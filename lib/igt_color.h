@@ -60,6 +60,16 @@ typedef struct igt_matrix_3x4 {
 	float m[12];
 } igt_matrix_3x4_t;
 
+typedef struct igt_matrix_3x3 {
+	/*
+	 * out   matrix       in
+	 * |R|   |0  1  2 |   | R |
+	 * |G| = |3  4  5 | x | G |
+	 * |B|   |6  7  8 |   | B |
+	 */
+	double m[9];
+} igt_matrix_3x3_t;
+
 const igt_matrix_3x4_t igt_matrix_3x4_50_desat = { {
 	0.5, 0.25, 0.25, 0.0,
 	0.25, 0.5, 0.25, 0.0,
@@ -116,7 +126,9 @@ typedef void (*igt_pixel_transform)(igt_pixel_t *pixel);
 int igt_color_transform_pixels(igt_fb_t *fb, igt_pixel_transform transforms[], int num_transforms);
 
 /* colorop helpers */
-
+void igt_colorop_set_ctm_3x3(igt_display_t *display,
+			     igt_colorop_t *colorop,
+			     const struct drm_color_ctm *matrix);
 void igt_colorop_set_ctm_3x4(igt_display_t *display,
 			     igt_colorop_t *colorop,
 			     const igt_matrix_3x4_t *matrix);
