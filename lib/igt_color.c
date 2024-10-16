@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+//te SPDX-License-Identifier: MIT
 /*
  * Copyright 2023 Advanced Micro Devices, Inc.
  *
@@ -16,6 +16,7 @@
 #include "igt_core.h"
 #include "igt_x86.h"
 
+#define MIN(a, b)	((a) < (b) ? (a) : (b))
 
 static float clamp(float val, float min, float max)
 {
@@ -668,6 +669,125 @@ void igt_colorop_set_custom_1dlut(igt_display_t *display,
 				  const size_t lut_size)
 {
 	igt_colorop_replace_prop_blob(colorop, IGT_COLOROP_DATA, lut1d, lut_size);
+}
+
+
+void create_zero_lut(segment_data_t *info, struct drm_color_lut_32 *lut)
+{
+	int i;
+
+	for (i = 0; i < info->entries_count; i++)
+		lut[i].red = lut[i].green = lut[i].blue = 0;
+}
+
+static uint32_t get_max(int precision)
+{
+	if(precision > 32)
+		precision = 32;
+
+	/* TODO: Revisit */
+	return (uint64_t)(1 << precision) - 1;
+}
+
+void create_unity_lut(segment_data_t *info, struct drm_color_lut_32 *lut)
+{
+	uint32_t val, segment, entry, index = 0;
+	float norm_val;
+
+	for (segment = 0; segment < info->segment_count; segment++) {
+		uint32_t entry_count = info->segment_data[segment].count;
+		uint32_t start = info->segment_data[segment].start;
+		uint32_t end = info->segment_data[segment].end;
+		uint32_t norm_factor = info->segment_data[segment].norm_factor;
+		int precision =  info->segment_data[segment].precision.intp + info->segment_data[segment].precision.fracp;
+		uint32_t max_val = get_max(precision);
+
+		/*TODO: Add int precision logic*/
+		for (entry = 0; entry < entry_count; entry++) {
+			norm_val = (start*1.0)/norm_factor + entry * ((end - start) * 1.0 / (((entry_count - 1) ? entry_count - 1 : 1) * norm_factor));
+			val = (norm_val * (1 << info->segment_data[segment].precision.fracp));
+
+			lut[index].red = lut[index].green = lut[index].blue =
+				( index == 0) ? 0 : MIN(val, max_val);
+
+			index++;
+		}
+	}
+}
+
+/* TODO: Correct max logic */
+void create_max_lut(segment_data_t *info, struct drm_color_lut_32 *lut)
+{
+	int i = 0;
+	uint32_t max_val, segment, entry;
+	int precision;
+
+	for (segment = 0; segment < info->segment_count; segment++) {
+		uint32_t entry_count = info->segment_data[segment].count;
+		uint32_t start = info->segment_data[segment].start;
+		precision =  info->segment_data[segment].precision.intp + info->segment_data[segment].precision.fracp;
+		max_val = get_max(precision);
+
+		/*TODO: Add int precision logic*/
+		for (entry = 1; entry <= entry_count; entry++) {
+			lut[i].red = lut[i].green = lut[i].blue = ( start == 0 && entry == 1) ? 0 : max_val;
+			i++;
+		}
+	}
+}
+
+void clear_segment_data(segment_data_t *info)
+{
+	if (!info)
+		return;
+
+	free(info->segment_data);
+	free(info);
+}
+
+segment_data_t *get_segment_data(int drm_fd, uint64_t blob_id)
+{
+	drmModePropertyBlobPtr blob;
+	struct drm_color_lut_range *lut_range = NULL;
+	segment_data_t *info = NULL;
+	uint32_t i;
+
+	blob = drmModeGetPropertyBlob(drm_fd, blob_id);
+	igt_assert(blob);
+	igt_assert(blob->length);
+
+	info = malloc(sizeof(segment_data_t));
+	igt_assert(info);
+
+	lut_range = (struct drm_color_lut_range *) blob->data;
+	info->segment_count = blob->length / sizeof(lut_range[0]);
+	igt_assert(info->segment_count);
+
+	info->segment_data = malloc(sizeof(struct drm_color_lut_range) * info->segment_count);
+	igt_assert(info->segment_data);
+
+	info->entries_count = 0;
+	for (i = 0; i < info->segment_count; i++) {
+		info->entries_count += lut_range[i].count;
+		info->segment_data[i] = lut_range[i];
+	}
+
+	drmModeFreePropertyBlob(blob);
+
+	return info;
+}
+
+void igt_colorop_set_custom_lut_1d_multseg(igt_display_t *display,
+				   igt_colorop_t *colorop,
+				   const kms_colorop_custom_lut1d_info_t lut_info)
+{
+	/* set blob property */
+	for (int i = 0; i < lut_info.lut_size; i++)
+		igt_debug("Lut[%d]: 0x%x 0x%x 0x%x\n",
+			 i, lut_info.lut[i].red, lut_info.lut[i].green, lut_info.lut[i].blue);
+
+	igt_colorop_replace_prop_blob(colorop, IGT_COLOROP_DATA,
+			lut_info.lut, sizeof(struct drm_color_lut_32) * lut_info.lut_size);
 }
 
 void igt_colorop_set_3dlut(igt_display_t *display,

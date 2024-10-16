@@ -35,6 +35,7 @@ typedef int (*transform_pixel)(igt_pixel_t *pixel);
 typedef enum kms_colorop_type {
 	KMS_COLOROP_ENUMERATED_LUT1D,
 	KMS_COLOROP_CUSTOM_LUT1D,
+	KMS_COLOROP_CUSTOM_LUT1D_MULTSEG,
 	KMS_COLOROP_CTM_3X3,
 	KMS_COLOROP_CTM_3X4,
 	KMS_COLOROP_MULTIPLIER,
@@ -73,6 +74,7 @@ typedef struct kms_colorop {
 
 	union {
 		kms_colorop_enumerated_lut1d_info_t enumerated_lut1d_info;
+		kms_colorop_custom_lut1d_info_t custom_lut1d_info;
 		igt_1dlut_t *lut1d;
 		igt_3dlut_t *lut3d;
 		const struct drm_color_ctm *matrix_3x3;

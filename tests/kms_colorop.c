@@ -242,6 +242,8 @@ static bool can_use_colorop(igt_display_t *display, igt_colorop_t *colorop, kms_
 		if (igt_colorop_get_prop(display, colorop, IGT_COLOROP_TYPE) == DRM_COLOROP_1D_LUT)
 			return true;
 		return false;
+ 	case KMS_COLOROP_CUSTOM_LUT1D_MULTSEG:
+		return (igt_colorop_get_prop(display, colorop, IGT_COLOROP_TYPE) == DRM_COLOROP_1D_LUT_MULTSEG);
 	case KMS_COLOROP_MULTIPLIER:
 		return (igt_colorop_get_prop(display, colorop, IGT_COLOROP_TYPE) == DRM_COLOROP_MULTIPLIER);
 	case KMS_COLOROP_LUT3D:
@@ -390,6 +392,9 @@ static void set_colorop(igt_display_t *display,
 		fill_custom_1dlut(display, colorop);
 		lut_size = igt_colorop_get_prop(display, colorop->colorop, IGT_COLOROP_SIZE);
 		igt_colorop_set_custom_1dlut(display, colorop->colorop, colorop->lut1d, lut_size * sizeof(struct drm_color_lut));
+		break;
+ 	case KMS_COLOROP_CUSTOM_LUT1D_MULTSEG:
+		igt_colorop_set_custom_lut_1d_multseg(display, colorop->colorop, colorop->custom_lut1d_info);
 		break;
 	case KMS_COLOROP_MULTIPLIER:
 		mult = colorop->multiplier * (mult << 32);	/* convert double to fixed number */

@@ -114,6 +114,29 @@ const igt_matrix_3x4_t igt_matrix_3x4_bt709_dec = { {
 } };
 #endif
 
+typedef struct {
+	uint32_t segment_count;
+	struct drm_color_lut_range *segment_data;
+	uint32_t entries_count;
+} segment_data_t;
+
+typedef enum kms_colorop_custom_lut1d_tf {
+	KMS_COLOROP_CUSTOM_LUT1D_ZERO,
+	KMS_COLOROP_CUSTOM_LUT1D_LINEAR,
+	KMS_COLOROP_CUSTOM_LUT1D_MAX,
+} kms_colorop_custom_lut1d_tf_t;
+
+typedef struct kms_colorop_custom_lut1d_info {
+	uint32_t lut_size;
+	kms_colorop_custom_lut1d_tf_t lut_type;
+	struct drm_color_lut_32 *lut;
+} kms_colorop_custom_lut1d_info_t;
+
+void create_zero_lut(segment_data_t *info, struct drm_color_lut_32 *lut);
+void create_unity_lut(segment_data_t *info, struct drm_color_lut_32 *lut);
+void create_max_lut(segment_data_t *info, struct drm_color_lut_32 *lut);
+void clear_segment_data(segment_data_t *info);
+segment_data_t *get_segment_data(int drm_fd, uint64_t blob_id);
 
 bool igt_cmp_fb_component(uint16_t comp1, uint16_t comp2, uint8_t up, uint8_t down);
 bool igt_cmp_fb_pixels(igt_fb_t *fb1, igt_fb_t *fb2, uint8_t up, uint8_t down);
@@ -132,6 +155,9 @@ void igt_colorop_set_ctm_3x3(igt_display_t *display,
 void igt_colorop_set_ctm_3x4(igt_display_t *display,
 			     igt_colorop_t *colorop,
 			     const igt_matrix_3x4_t *matrix);
+void igt_colorop_set_custom_lut_1d_multseg(igt_display_t *display,
+			     igt_colorop_t *colorop,
+			     const kms_colorop_custom_lut1d_info_t custom_lut1d_info);
 
 void igt_colorop_set_custom_1dlut(igt_display_t *display,
 				  igt_colorop_t *colorop,
