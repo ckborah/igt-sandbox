@@ -3671,6 +3671,29 @@ static uint32_t igt_plane_get_fb_id(igt_plane_t *plane)
 	return plane->values[IGT_PLANE_FB_ID];
 }
 
+static bool
+igt_atomic_ignore_plane_prop(igt_pipe_t *pipe, uint32_t prop)
+{
+	igt_display_t *display = pipe->display;
+
+	if (display->has_plane_color_pipeline) {
+		switch(prop) {
+			case IGT_PLANE_COLOR_ENCODING:
+			case IGT_PLANE_COLOR_RANGE:
+				return true;
+			default:
+				return false;
+		}
+	} else {
+		switch(prop) {
+			default:
+				return false;
+		}
+	}
+
+	return false;
+}
+
 #define CHECK_RETURN(r, fail) {	\
 	if (r && !fail)		\
 		return r;	\
@@ -3696,6 +3719,13 @@ igt_atomic_prepare_plane_commit(igt_plane_t *plane, igt_pipe_t *pipe,
 	    igt_plane_get_fb_id(plane));
 
 	for (i = 0; i < IGT_NUM_PLANE_PROPS; i++) {
+		if (igt_atomic_ignore_plane_prop(pipe, i)) {
+			igt_debug("plane %s.%d: Ignoring property \"%s\" to 0x%"PRIx64"/%"PRIi64"\n",
+					kmstest_pipe_name(pipe->pipe), plane->index, igt_plane_prop_names[i],
+					plane->values[i], plane->values[i]);
+			continue;
+		}
+
 		if (!igt_plane_is_prop_changed(plane, i))
 			continue;
 

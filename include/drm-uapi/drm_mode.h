@@ -937,20 +937,20 @@ enum drm_colorop_type {
 	DRM_COLOROP_1D_LUT,
 
 	/**
-	 * @DRM_COLOROP_CTM_3X4:
-	 *
-	 * A 3x4 matrix. Its values are specified via the
-	 * &drm_color_ctm_3x4 struct provided via the DATA property.
-	 */
-	DRM_COLOROP_CTM_3X4,
-
-	/**
 	 * @DRM_COLOROP_1D_LUT_MULTSEG:
 	 *
 	 * A multi segmented 1D LUT
 	 */
 	DRM_COLOROP_1D_LUT_MULTSEG,
 
+	/**
+	 * @DRM_COLOROP_CTM_3X4:
+	 *
+	 * A 3x4 matrix. Its values are specified via the
+	 * &drm_color_ctm_3x4 struct provided via the DATA property.
+	 */
+	DRM_COLOROP_CTM_3X4,
+	
 	/**
 	 * @DRM_COLOROP_CTM_3X3:
 	 *
