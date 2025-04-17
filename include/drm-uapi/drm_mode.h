@@ -36,10 +36,10 @@ extern "C" {
 /**
  * DOC: overview
  *
- * DRM exposes many UAPI and structure definition to have a consistent
- * and standardized interface with user.
+ * DRM exposes many UAPI and structure definitions to have a consistent
+ * and standardized interface with users.
  * Userspace can refer to these structure definitions and UAPI formats
- * to communicate to driver
+ * to communicate to drivers.
  */
 
 #define DRM_CONNECTOR_NAME_LEN	32
@@ -540,7 +540,7 @@ struct drm_mode_get_connector {
 /* the PROP_ATOMIC flag is used to hide properties from userspace that
  * is not aware of atomic properties.  This is mostly to work around
  * older userspace (DDX drivers) that read/write each prop they find,
- * witout being aware that this could be triggering a lengthy modeset.
+ * without being aware that this could be triggering a lengthy modeset.
  */
 #define DRM_MODE_PROP_ATOMIC        0x80000000
 
@@ -665,7 +665,7 @@ struct drm_mode_fb_cmd {
 };
 
 #define DRM_MODE_FB_INTERLACED	(1<<0) /* for interlaced framebuffers */
-#define DRM_MODE_FB_MODIFIERS	(1<<1) /* enables ->modifer[] */
+#define DRM_MODE_FB_MODIFIERS	(1<<1) /* enables ->modifier[] */
 
 /**
  * struct drm_mode_fb_cmd2 - Frame-buffer metadata.
@@ -852,12 +852,10 @@ struct drm_color_ctm_3x4 {
 	 * Conversion matrix with 3x4 dimensions in S31.32 sign-magnitude
 	 * (not two's complement!) format.
 	 *
-	 * TODO what's the format?
-	 *
 	 * out   matrix          in
 	 * |R|   |0  1  2  3 |   | R |
 	 * |G| = |4  5  6  7 | x | G |
-	 * |B|   |8  9  10 12|   | B |
+	 * |B|   |8  9  10 11|   | B |
 	 *                       |1.0|
 	 */
 	__u64 matrix[12];
@@ -891,139 +889,116 @@ struct drm_color_lut_32 {
 	__u32 reserved;
 };
 
-struct drm_color_lut_range {
-	/* DRM_COLOROP_1D_LUT_MULTSEG_* */
-	__u32 flags;
-	/* number of points on the curve in the segment */
-	__u16 count;
-	/* input start/end values of the segment */
-	__s32 start, end;
-	/* normalization factor. Represents 1.0 in terms of smallest step size */
-	__u32 norm_factor;
-
-	/* precision of HW LUT*/
-	struct {
-		/* Integer precision */
-		__u16 intp;
-		/* Fractional precision */
-		__u16 fracp;
-	} precision;
-};
-
 /**
  * enum drm_colorop_type - Type of color operation
- *
  *
  * drm_colorops can be of many different types. Each type behaves differently
  * and defines a different set of properties. This enum defines all types and
  * gives a high-level description.
  */
+
 enum drm_colorop_type {
 	/**
 	 * @DRM_COLOROP_1D_CURVE:
 	 *
+	 * enum string "1D Curve"
+	 *
 	 * A 1D curve that is being applied to all color channels. The
-	 * curve is specified via tha CURVE_1D_TYPE colorop property.
+	 * curve is specified via the CURVE_1D_TYPE colorop property.
 	 */
 	DRM_COLOROP_1D_CURVE,
 
 	/**
 	 * @DRM_COLOROP_1D_LUT:
 	 *
+	 * enum string "1D LUT"
+	 *
 	 * A simple 1D LUT of uniformly spaced &drm_color_lut entries,
-	 * packed into a blob via the DATA property. The driver's expected
-	 * LUT size is advertised via the SIZE property.
+	 * packed into a blob via the DATA property. The driver's
+	 * expected LUT size is advertised via the SIZE property.
+	 *
+	 * The DATA blob is an array of struct drm_color_lut with size
+	 * of "lut_size".
 	 */
 	DRM_COLOROP_1D_LUT,
 
 	/**
 	 * @DRM_COLOROP_1D_LUT_MULTSEG:
 	 *
-	 * A multi segmented 1D LUT
+	 * A 1D LUT with multiple segments to cover the full color range with non-uniformly
+	 * distributed &drm_color_lut entries, packed into a blob via the DATA property.
+	 * The driver's expected LUT size and segmented capabilities are advertised via the
+	 * HW_CAPS property.
 	 */
 	DRM_COLOROP_1D_LUT_MULTSEG,
 
 	/**
 	 * @DRM_COLOROP_CTM_3X4:
 	 *
+	 * enum string "3x4 Matrix"
+	 *
 	 * A 3x4 matrix. Its values are specified via the
 	 * &drm_color_ctm_3x4 struct provided via the DATA property.
+	 *
+	 * The DATA blob is a float[12]:
+	 * out   matrix          in
+	 * | R |   | 0  1  2  3  |   | R |
+	 * | G | = | 4  5  6  7  | x | G |
+	 * | B |   | 8  9  10 12 |   | B |
 	 */
 	DRM_COLOROP_CTM_3X4,
-	
+
 	/**
 	 * @DRM_COLOROP_CTM_3X3:
 	 *
-	 * A 3x4 matrix. Its values are specified via the
-	 * &drm_color_ctm_3x3 struct provided via the DATA property.
+	 * A 3x3 matrix. Its values are specified via the
+	 * &drm_color_ctm struct provided via the DATA property.
 	 */
 	DRM_COLOROP_CTM_3X3,
 
 	/**
 	 * @DRM_COLOROP_MULTIPLIER:
 	 *
+	 * enum string "Multiplier"
+	 *
 	 * A simple multiplier, applied to all color values. The
 	 * multiplier is specified as a S31.32 via the MULTIPLIER
 	 * property.
 	 */
 	DRM_COLOROP_MULTIPLIER,
+
 	/**
 	 * @DRM_COLOROP_3D_LUT:
 	 *
+	 * enum string "3D LUT"
+	 *
 	 * A 3D LUT of &drm_color_lut entries,
 	 * packed into a blob via the DATA property. The driver's expected
-	 * LUT size is advertised via the SIZE property.
+	 * LUT size is advertised via the SIZE property, i.e., a 3D LUT with
+	 * 17x17x17 entries will have SIZE set to 17.
+	 *
+	 * The DATA blob is a 3D array of struct drm_color_lut with dimension
+	 * length of "lut_size".
+	 * The LUT elements are traversed like so:
+	 *
+	 *   for R in range 0..n
+	 *     for G in range 0..n
+	 *       for B in range 0..n
+	 *         color = lut3d[R][G][B]
 	 */
 	DRM_COLOROP_3D_LUT,
 };
 
-enum drm_colorop_interpolation_type {
-	DRM_COLOROP_TETRAHEDRAL,
-};
-
-enum drm_colorop_traversal_order {
-	DRM_COLOROP_TRAVERSAL_RGB,
-	DRM_COLOROP_TRAVERSAL_BGR,
-};
-
-struct drm_mode_3dlut_mode {
+/**
+ * enum drm_colorop_lut3d_interpolation_type - type of 3DLUT interpolation
+ */
+enum drm_colorop_lut3d_interpolation_type {
 	/**
-	 * @lut_size: 3D LUT size - can be 9, 17 or 33
-	 */
-	__u16 lut_size;
-	/**
-	 * @lut_stride: dimensions of 3D LUT. Must be larger than lut_size
-	 */
-	__u16 lut_stride[3];
-	/**
-	 * @interpolation: interpolation algorithm for 3D LUT. See drm_colorop_interpolation_type
-	 */
-	__u16 interpolation;
-	/**
-	 * @color_depth: color depth - can be 8, 10 or 12
-	 */
-	__u16 color_depth;
-	/**
-	 * @color_format: color format specifieid by fourcc values
-	 * ex. DRM_FORMAT_XRGB16161616 - color in order of RGB, each is 16bit.
-	 */
-	__u32 color_format;
-	/**
-	 * @traversal_order: RGB color placement in 3D array, lut3d[R][G][B] or lut3d[B][G][R]
-	 * ex. for a 3D array with size of 17 -
-	 * DRM_COLOROP_TRAVERSAL_RGB is traversd by
-	 *   for R in range 0..16
-	 *     for G in range 0..16
-	 *       for B in range 0..16
-	 *         color = lut3d[R][G][B]
+	 * @DRM_COLOROP_LUT3D_INTERPOLATION_TETRAHEDRAL:
 	 *
-	 * DRM_COLOROP_TRAVERSAL_BGR is traversd by
-	 *   for R in range 0..16
-	 *     for G in range 0..16
-	 *       for B in range 0..16
-	 *         color = lut3d[B][G][R]
+	 * Tetrahedral 3DLUT interpolation
 	 */
-	__u16 traversal_order;
+	DRM_COLOROP_LUT3D_INTERPOLATION_TETRAHEDRAL,
 };
 
 /**
@@ -1037,6 +1012,19 @@ enum drm_colorop_lut1d_interpolation_type {
 	 * linearly interpolated.
 	 */
 	DRM_COLOROP_LUT1D_INTERPOLATION_LINEAR,
+};
+
+/**
+ * struct drm_plane_size_hint - Plane size hints
+ * @width: The width of the plane in pixel
+ * @height: The height of the plane in pixel
+ *
+ * The plane SIZE_HINTS property blob contains an
+ * array of struct drm_plane_size_hint.
+ */
+struct drm_plane_size_hint {
+	__u16 width;
+	__u16 height;
 };
 
 /**
@@ -1063,8 +1051,8 @@ struct hdr_metadata_infoframe {
 	 * These are coded as unsigned 16-bit values in units of
 	 * 0.00002, where 0x0000 represents zero and 0xC350
 	 * represents 1.0000.
-	 * @display_primaries.x: X cordinate of color primary.
-	 * @display_primaries.y: Y cordinate of color primary.
+	 * @display_primaries.x: X coordinate of color primary.
+	 * @display_primaries.y: Y coordinate of color primary.
 	 */
 	struct {
 		__u16 x, y;
@@ -1074,8 +1062,8 @@ struct hdr_metadata_infoframe {
 	 * These are coded as unsigned 16-bit values in units of
 	 * 0.00002, where 0x0000 represents zero and 0xC350
 	 * represents 1.0000.
-	 * @white_point.x: X cordinate of whitepoint of color primary.
-	 * @white_point.y: Y cordinate of whitepoint of color primary.
+	 * @white_point.x: X coordinate of whitepoint of color primary.
+	 * @white_point.y: Y coordinate of whitepoint of color primary.
 	 */
 	struct {
 		__u16 x, y;
@@ -1139,6 +1127,15 @@ struct hdr_output_metadata {
  * Request that the page-flip is performed as soon as possible, ie. with no
  * delay due to waiting for vblank. This may cause tearing to be visible on
  * the screen.
+ *
+ * When used with atomic uAPI, the driver will return an error if the hardware
+ * doesn't support performing an asynchronous page-flip for this update.
+ * User-space should handle this, e.g. by falling back to a regular page-flip.
+ *
+ * Note, some hardware might need to perform one last synchronous page-flip
+ * before being able to switch to asynchronous page-flips. As an exception,
+ * the driver will return success even though that first page-flip is not
+ * asynchronous.
  */
 #define DRM_MODE_PAGE_FLIP_ASYNC 0x02
 #define DRM_MODE_PAGE_FLIP_TARGET_ABSOLUTE 0x4
@@ -1153,6 +1150,70 @@ struct hdr_output_metadata {
 #define DRM_MODE_PAGE_FLIP_FLAGS (DRM_MODE_PAGE_FLIP_EVENT | \
 				  DRM_MODE_PAGE_FLIP_ASYNC | \
 				  DRM_MODE_PAGE_FLIP_TARGET)
+
+/**
+ * DRM_COLOROP_1D_LUT_MULTSEG_INTERPOLATE
+ *
+ * linearly interpolate between the points
+ */
+#define DRM_COLOROP_1D_LUT_MULTSEG_INTERPOLATE BIT(0)
+
+/**
+ * DRM_COLOROP_1D_LUT_MULTSEG_REUSE_LAST
+ *
+ * the last value of the previous range is the
+ * first value of the current range.
+ */
+#define DRM_COLOROP_1D_LUT_MULTSEG_REUSE_LAST BIT(1)
+
+/**
+ * DRM_COLOROP_1D_LUT_MULTSEG_NON_DECREASING
+ *
+ * the curve must be non-decreasing
+ */
+#define DRM_COLOROP_1D_LUT_MULTSEG_NON_DECREASING BIT(2)
+
+/**
+ * DRM_COLOROP_1D_LUT_MULTSEG_REFLECT_NEGATIVE
+ *
+ *  the curve is reflected across origin for negative inputs
+ */
+#define DRM_COLOROP_1D_LUT_MULTSEG_REFLECT_NEGATIVE BIT(3)
+
+/**
+ * DRM_COLOROP_1D_LUT_MULTSEG_SINGLE_CHANNEL
+ *
+ * the same curve (red) is used for blue and green channels as well
+ */
+#define DRM_COLOROP_1D_LUT_MULTSEG_SINGLE_CHANNEL BIT(4)
+
+/**
+ * struct drm_color_lut_range
+ *
+ * structure to advertise capability of a color hardware
+ * block that accepts LUT values.  It can represent LUTs with
+ * varied number of entries and distributions
+ * (Multi segmented, Logarithmic etc).
+ */
+
+struct drm_color_lut_range {
+	/* DRM_COLOROP_1D_LUT_MULTSEG_* */
+	__u32 flags;
+	/* number of points on the curve in the segment */
+	__u16 count;
+	/* input start/end values of the segment */
+	__s32 start, end;
+	/* normalization factor. Represents 1.0 in terms of smallest step size */
+	__u32 norm_factor;
+
+	/* precision of HW LUT*/
+	struct {
+		/* Integer precision */
+		__u16 intp;
+		/* Fractional precision */
+		__u16 fracp;
+	} precision;
+};
 
 /*
  * Request a page flip on the specified crtc.
@@ -1214,13 +1275,25 @@ struct drm_mode_crtc_page_flip_target {
 	__u64 user_data;
 };
 
-/* create a dumb scanout buffer */
+/**
+ * struct drm_mode_create_dumb - Create a KMS dumb buffer for scanout.
+ * @height: buffer height in pixels
+ * @width: buffer width in pixels
+ * @bpp: bits per pixel
+ * @flags: must be zero
+ * @handle: buffer object handle
+ * @pitch: number of bytes between two consecutive lines
+ * @size: size of the whole buffer in bytes
+ *
+ * User-space fills @height, @width, @bpp and @flags. If the IOCTL succeeds,
+ * the kernel fills @handle, @pitch and @size.
+ */
 struct drm_mode_create_dumb {
 	__u32 height;
 	__u32 width;
 	__u32 bpp;
 	__u32 flags;
-	/* handle, pitch, size will be returned */
+
 	__u32 handle;
 	__u32 pitch;
 	__u64 size;
@@ -1491,6 +1564,16 @@ struct drm_mode_rect {
 	__s32 y1;
 	__s32 x2;
 	__s32 y2;
+};
+
+/**
+ * struct drm_mode_closefb
+ * @fb_id: Framebuffer ID.
+ * @pad: Must be zero.
+ */
+struct drm_mode_closefb {
+	__u32 fb_id;
+	__u32 pad;
 };
 
 #if defined(__cplusplus)

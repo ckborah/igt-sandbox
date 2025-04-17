@@ -69,6 +69,11 @@ typedef struct kms_colorop_enumerated_lut1d_info {
 	kms_colorop_lut1d_tf_t tf;
 } kms_colorop_enumerated_lut1d_info_t;
 
+typedef struct kms_colorop_lut3d_info {
+	uint32_t size;
+	enum drm_colorop_lut3d_interpolation_type interpolation;
+} kms_colorop_lut3d_info_t;
+
 typedef struct kms_colorop {
 	kms_colorop_type_t type;
 
@@ -82,7 +87,7 @@ typedef struct kms_colorop {
 		double multiplier;
 	};
 
-	struct drm_mode_3dlut_mode lut3d_mode;
+	kms_colorop_lut3d_info_t lut3d_info;
 
 	const char *name;
 
@@ -249,6 +254,17 @@ kms_colorop_t kms_colorop_multiply_inv_125 = {
 kms_colorop_t kms_colorop_3dlut_17_12_rgb = {
 	.type =	KMS_COLOROP_LUT3D,
 	.lut3d = &igt_3dlut_17_rgb,
+	.lut3d_info = {
+		.size = 17,
+		.interpolation = DRM_COLOROP_LUT3D_INTERPOLATION_TETRAHEDRAL,
+	},
+	.name = "3dlut with traversal order RGB",
+	.transform = &igt_color_3dlut_17_12_rgb,
+};
+/*
+kms_colorop_t kms_colorop_3dlut_17_12_rgb = {
+	.type =	KMS_COLOROP_LUT3D,
+	.lut3d = &igt_3dlut_17_rgb,
 	.lut3d_mode = {
 		.lut_size = 17,
 		.lut_stride = {17, 17, 17},
@@ -275,5 +291,5 @@ kms_colorop_t kms_colorop_3dlut_17_12_bgr = {
 	.name = "3dlut with traversal order DRM_COLOROP_TRAVERSAL_BGR",
 	.transform = &igt_color_3dlut_17_12_bgr,
 };
-
+*/
 #endif /* __KMS_COLOROP_H__ */

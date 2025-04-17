@@ -826,6 +826,7 @@ static bool can_use_colorop(igt_display_t *display, igt_colorop_t *colorop, kms_
         case KMS_COLOROP_MULTIPLIER:
                 return (igt_colorop_get_prop(display, colorop, IGT_COLOROP_TYPE) == DRM_COLOROP_MULTIPLIER);
         case KMS_COLOROP_LUT3D:
+		igt_critical("get prop %d\n", igt_colorop_get_prop(display, colorop, IGT_COLOROP_TYPE));
                 return (igt_colorop_get_prop(display, colorop, IGT_COLOROP_TYPE) == DRM_COLOROP_3D_LUT);
         default:
                 return false;
@@ -925,43 +926,31 @@ static void fill_custom_1dlut(igt_display_t *display, kms_colorop_t *colorop)
 }
 
 static void configure_3dlut(igt_display_t *display, kms_colorop_t *colorop,
-                                  struct drm_mode_3dlut_mode *modes,
-                                  uint64_t num_mode) {
-        uint64_t lut_size = 0;
-        uint64_t i;
-        igt_3dlut_norm_t *igt_3dlut;
+		uint64_t size) {
+	uint64_t lut_size = 0;
+	uint64_t i;
+	igt_3dlut_norm_t *igt_3dlut;
 
-        /* Convert 3DLUT floating points to u16 required by colorop API */
-        lut_size = colorop->lut3d_mode.lut_size * colorop->lut3d_mode.lut_size * colorop->lut3d_mode.lut_size;
-        igt_3dlut = (igt_3dlut_norm_t *) malloc(sizeof(struct drm_color_lut) * lut_size);
-        for (i = 0; i < lut_size; i++) {
-                struct igt_color_lut_float *lut_f = &colorop->lut3d->lut[i];
-                igt_3dlut->lut[i].red = round (lut_f->red * 0xFFFF);
-                igt_3dlut->lut[i].green = round (lut_f->green * 0xFFFF);
-                igt_3dlut->lut[i].blue = round (lut_f->blue * 0xFFFF);
-        }
+	/* Convert 3DLUT floating points to u16 required by colorop API */
+	lut_size = size * size * size;
+	igt_3dlut = (igt_3dlut_norm_t *) malloc(sizeof(struct drm_color_lut) * lut_size);
+	for (i = 0; i < lut_size; i++) {
+		struct igt_color_lut_float *lut_f = &colorop->lut3d->lut[i];
+		igt_3dlut->lut[i].red = round (lut_f->red * 0xFFFF);
+		igt_3dlut->lut[i].green = round (lut_f->green * 0xFFFF);
+		igt_3dlut->lut[i].blue = round (lut_f->blue * 0xFFFF);
+	}
 
-        /* find the exact lut mode supported by a kms_colorop_3dlut_* test */
-        for (i = 0; i < num_mode; i++)
-                if (!memcmp(&colorop->lut3d_mode, &modes[i], sizeof(struct drm_mode_3dlut_mode)))
-                        break;
-
-        igt_skip_on_f(i == num_mode, "no matching 3dlut mode\n");
-        igt_colorop_set_prop_value(colorop->colorop, IGT_COLOROP_3DLUT_MODE_INDEX, i);
-
-        lut_size = modes[i].lut_stride[0] * modes[i].lut_stride[1] * modes[i].lut_stride[2];
-        igt_colorop_set_3dlut(display, colorop->colorop, igt_3dlut, lut_size * sizeof(struct drm_color_lut));
-        free(igt_3dlut);
+	igt_colorop_set_3dlut(display, colorop->colorop, igt_3dlut, lut_size * sizeof(struct drm_color_lut));
+	free(igt_3dlut);
 }
 
 static void set_colorop(igt_display_t *display,
                         kms_colorop_t *colorop)
 {
-        drmModePropertyBlobPtr blob = NULL;
-        struct drm_mode_3dlut_mode *modes;
         uint64_t lut_size = 0;
         uint64_t mult = 1;
-        uint64_t blob_id;
+	enum drm_colorop_lut3d_interpolation_type interpolation;
 
         igt_assert(colorop->colorop);
         igt_colorop_set_prop_value(colorop->colorop, IGT_COLOROP_BYPASS, 0);
@@ -989,13 +978,17 @@ static void set_colorop(igt_display_t *display,
                 igt_colorop_set_prop_value(colorop->colorop, IGT_COLOROP_MULTIPLIER, mult);
                 break;
         case KMS_COLOROP_LUT3D:
-                blob_id = igt_colorop_get_prop(display, colorop->colorop, IGT_COLOROP_3DLUT_MODES);
-                igt_assert(blob_id);
-                blob = drmModeGetPropertyBlob(display->drm_fd, blob_id);
-                igt_assert(blob);
-                modes = (struct drm_mode_3dlut_mode *) blob->data;
-                configure_3dlut(display, colorop, modes, blob->length / sizeof(struct drm_mode_3dlut_mode));
-                break;
+		lut_size = igt_colorop_get_prop(display, colorop->colorop, IGT_COLOROP_SIZE);
+		interpolation = igt_colorop_get_prop(display, colorop->colorop, IGT_COLOROP_LUT3D_INTERPOLATION);
+
+		/* Check driver's lut size, color depth and interpolation with kms_colorop */
+		igt_skip_on(colorop->lut3d_info.size != lut_size);
+		igt_skip_on(colorop->lut3d_info.interpolation != interpolation);
+
+		igt_critical("set 3d lut\n");
+
+		configure_3dlut(display, colorop, lut_size);
+		break;
         default:
                 igt_fail(IGT_EXIT_FAILURE);
         }
@@ -1068,6 +1061,8 @@ static bool test_plane_colorops(data_t *data,
 	struct igt_fb fb;
 	bool ret;
 	igt_colorop_t *color_pipeline = get_color_pipeline(display, plane, colorops);
+	igt_critical("color pipeline %p\n", color_pipeline);
+	igt_skip_on(!color_pipeline);
 	igt_crc_t crc_gamma, crc_fullcolors;
 
 	igt_output_set_pipe(output, plane->pipe->pipe);
@@ -1124,7 +1119,9 @@ static bool test_plane_colorops(data_t *data,
 	igt_output_set_pipe(output, PIPE_NONE);
 	igt_display_commit2(display, COMMIT_ATOMIC);
 
-	return ret;
+	//return ret;
+	igt_critical("reached end\n");
+	return 0;
 }
 
 static void
@@ -1598,6 +1595,16 @@ run_tests_for_pipe(data_t *data)
 			0.0, 1.0, 0.0,
 			1.0, 0.0, 1.0
 		} };
+		kms_colorop_t lut3d = {
+			.type =	KMS_COLOROP_LUT3D,
+			.lut3d = &igt_3dlut_17_rgb,
+			.lut3d_info = {
+				.size = 17,
+				.interpolation = DRM_COLOROP_LUT3D_INTERPOLATION_TETRAHEDRAL,
+			},
+			.name = "3dlut with traversal order RGB",
+			.transform = &igt_color_3dlut_17_12_rgb,
+		};
 		kms_colorop_t lut1d_linear = {
 			.type = KMS_COLOROP_CUSTOM_LUT1D_MULTSEG,
 			.name = "Pre/Post CSC GAMMA (linear LUT)",
@@ -1652,6 +1659,11 @@ run_tests_for_pipe(data_t *data)
 			  .fb_colors = colors_rgb,
 			  .exp_colors = colors_red_to_blue,
 			  .colorops = { &lut1d_linear, &ctm_3x3, &lut1d_max, NULL },
+			},
+			{ .name = "3dlut", 
+			  .fb_colors = colors_rgb,
+			  .exp_colors = colors_rgb,
+			  .colorops = {&lut3d, NULL}
 			},
 		};
 

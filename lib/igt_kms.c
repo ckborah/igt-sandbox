@@ -699,8 +699,8 @@ const char * const igt_colorop_prop_names[IGT_NUM_COLOROP_PROPS] = {
 	[IGT_COLOROP_SIZE] = "SIZE",
 	[IGT_COLOROP_DATA] = "DATA",
 	[IGT_COLOROP_MULTIPLIER] = "MULTIPLIER",
-	[IGT_COLOROP_3DLUT_MODES] = "3DLUT_MODES",
-	[IGT_COLOROP_3DLUT_MODE_INDEX] = "3DLUT_MODE_INDEX",
+	[IGT_COLOROP_COLOR_DEPTH] = "COLOR_DEPTH",
+	[IGT_COLOROP_LUT3D_INTERPOLATION] = "LUT3D_INTERPOLATION",
 	[IGT_COLOROP_NEXT] = "NEXT",
 };
 
@@ -4349,6 +4349,7 @@ bool igt_plane_is_valid_colorop(igt_plane_t *plane, igt_colorop_t *colorop)
 	bool found = false;
 
 	for (i = 0; i < plane->num_color_pipelines; i++) {
+		igt_critical("color pipeline %p color_op %p\n", plane->color_pipelines[i], colorop);
 		if (plane->color_pipelines[i] == colorop) {
 			found = true;
 			break;
