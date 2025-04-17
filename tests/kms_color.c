@@ -34,6 +34,7 @@
 
 #include "kms_color_helper.h"
 #include "kms_colorop.h"
+#include "igt_color_3dlut.h"
 
 #define MAX_COLOROPS	5
 
@@ -1597,7 +1598,7 @@ run_tests_for_pipe(data_t *data)
 		} };
 		kms_colorop_t lut3d = {
 			.type =	KMS_COLOROP_LUT3D,
-			.lut3d = &igt_3dlut_17_rgb,
+			.lut3d = &igt_3dlut_supressgreen,
 			.lut3d_info = {
 				.size = 17,
 				.interpolation = DRM_COLOROP_LUT3D_INTERPOLATION_TETRAHEDRAL,
