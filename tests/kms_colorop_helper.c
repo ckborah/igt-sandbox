@@ -200,6 +200,13 @@ kms_colorop_t kms_colorop_3dlut_17_12_rgb = {
 	.transform = &igt_color_3dlut_17_12_rgb,
 };
 
+const char * const kms_colorop_csc_ff_names[KMS_COLOROP_CSC_FF_NUM_ENUMS] = {
+	[KMS_COLOROP_CSC_FF_YUV601_RGB601] = "YUV601 to RGB601",
+	[KMS_COLOROP_CSC_FF_YUV709_RGB709] = "YUV709 to RGB709",
+	[KMS_COLOROP_CSC_FF_YUV2020_RGB2020] = "YUV2020 to RGB2020",
+	[KMS_COLOROP_CSC_FF_RGB709_RGB2020] = "RGB709 to RGB2020",
+};
+
 static bool can_use_colorop(igt_display_t *display, igt_colorop_t *colorop, kms_colorop_t *desired)
 {
 	switch (desired->type) {
@@ -218,6 +225,10 @@ static bool can_use_colorop(igt_display_t *display, igt_colorop_t *colorop, kms_
 		return (igt_colorop_get_prop(display, colorop, IGT_COLOROP_TYPE) == DRM_COLOROP_MULTIPLIER);
 	case KMS_COLOROP_LUT3D:
 		return (igt_colorop_get_prop(display, colorop, IGT_COLOROP_TYPE) == DRM_COLOROP_3D_LUT);
+	case KMS_COLOROP_CSC_FF:
+		if (igt_colorop_get_prop(display, colorop, IGT_COLOROP_TYPE) == DRM_COLOROP_CSC_FF &&
+		    igt_colorop_try_prop_enum(colorop, IGT_COLOROP_CSC_FF_TYPE, kms_colorop_csc_ff_names[desired->csc_ff_info.csc_ff]))
+			return true;
 	default:
 		return false;
 	}
@@ -362,6 +373,9 @@ static void set_colorop(igt_display_t *display, kms_colorop_t *colorop)
 
 		configure_3dlut(display, colorop, lut_size);
 		break;
+	case KMS_COLOROP_CSC_FF:
+		igt_colorop_set_prop_enum(colorop->colorop, IGT_COLOROP_CSC_FF_TYPE, kms_colorop_csc_ff_names[colorop->csc_ff_info.csc_ff]);
+		break;
 	default:
 		igt_fail(IGT_EXIT_FAILURE);
 	}
@@ -416,6 +430,7 @@ static void reset_colorop(kms_colorop_t *colorop)
 		igt_colorop_set_prop_value(colorop->colorop, IGT_COLOROP_MULTIPLIER, 1);
 		break;
 	case KMS_COLOROP_ENUMERATED_LUT1D:
+	case KMS_COLOROP_CSC_FF:
 	default:
 		return;
 	}

@@ -22,7 +22,8 @@ typedef enum kms_colorop_type {
 	KMS_COLOROP_CUSTOM_LUT1D,
 	KMS_COLOROP_CTM_3X4,
 	KMS_COLOROP_MULTIPLIER,
-	KMS_COLOROP_LUT3D
+	KMS_COLOROP_LUT3D,
+	KMS_COLOROP_CSC_FF
 } kms_colorop_type_t;
 
 typedef enum kms_colorop_lut1d_tf {
@@ -50,6 +51,18 @@ typedef struct kms_colorop_lut3d_info {
 	enum drm_colorop_lut3d_interpolation_type interpolation;
 } kms_colorop_lut3d_info_t;
 
+typedef enum kms_colorop_csc_ff {
+	KMS_COLOROP_CSC_FF_YUV601_RGB601,
+	KMS_COLOROP_CSC_FF_YUV709_RGB709,
+	KMS_COLOROP_CSC_FF_YUV2020_RGB2020,
+	KMS_COLOROP_CSC_FF_RGB709_RGB2020,
+	KMS_COLOROP_CSC_FF_NUM_ENUMS
+} kms_colorop_csc_ff_t;
+
+typedef struct kms_colorop_csc_ff_info {
+	kms_colorop_csc_ff_t csc_ff;
+} kms_colorop_csc_ff_info_t;
+
 typedef struct kms_colorop {
 	kms_colorop_type_t type;
 
@@ -59,6 +72,7 @@ typedef struct kms_colorop {
 		const igt_3dlut_t *lut3d;
 		const igt_matrix_3x4_t *matrix_3x4;
 		double multiplier;
+		kms_colorop_csc_ff_info_t csc_ff_info;
 	};
 
 	kms_colorop_lut3d_info_t lut3d_info;
