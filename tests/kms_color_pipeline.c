@@ -130,7 +130,8 @@ static void _test_plane_colorops(data_t *data,
 				 igt_plane_t *plane,
 				 const color_t *fb_colors,
 				 igt_crc_t *crc_ref,
-				 kms_colorop_t *colorops[])
+				 kms_colorop_t *colorops[],
+				 bool verify_crc)
 {
 	igt_display_t *display = &data->display;
 	drmModeModeInfo *mode = data->mode;
@@ -162,10 +163,12 @@ static void _test_plane_colorops(data_t *data,
 
 	igt_plane_set_fb(plane, &fb);
 	igt_display_commit_atomic(&data->display, 0, NULL);
-	igt_wait_for_vblank(plane->crtc);
-	igt_pipe_crc_collect_crc(data->pipe_crc, &crc_pipe);
 
-	igt_assert_crc_equal(crc_ref, &crc_pipe);
+	if (verify_crc) {
+		igt_wait_for_vblank(plane->crtc);
+		igt_pipe_crc_collect_crc(data->pipe_crc, &crc_pipe);
+		igt_assert_crc_equal(crc_ref, &crc_pipe);
+	}
 
 	/* Cleanup per-test state */
 	set_color_pipeline_bypass(plane);
@@ -179,14 +182,16 @@ static void _test_plane_colorops(data_t *data,
 static void test_plane_colorops(data_t *data, igt_crtc_t *crtc,
 				const color_t *fb_colors,
 				const color_t *exp_colors,
-				kms_colorop_t *colorops[])
+				kms_colorop_t *colorops[],
+				bool verify_crc)
 {
 	int n_planes = crtc->n_planes;
 	igt_output_t *output = data->output;
 	igt_plane_t *plane;
 	igt_crc_t ref_crc;
 
-	capture_ref_crc(data, output, exp_colors, &ref_crc);
+	if (verify_crc)
+		capture_ref_crc(data, output, exp_colors, &ref_crc);
 
 	for (int plane_id = 0; plane_id < n_planes; plane_id++) {
 		plane = igt_output_get_plane(output, plane_id);
@@ -196,7 +201,7 @@ static void test_plane_colorops(data_t *data, igt_crtc_t *crtc,
 
 		igt_dynamic_f("pipe-%s-plane-%u", kmstest_pipe_name(crtc->pipe), plane_id)
 			_test_plane_colorops(data, plane, fb_colors,
-					     &ref_crc, colorops);
+					     &ref_crc, colorops, verify_crc);
 	}
 }
 
@@ -267,57 +272,81 @@ run_tests_for_plane(data_t *data)
 		.name = "CTM 3X4 (linear)",
 		.matrix_3x4 = &ctm_linear,
 	};
+	kms_colorop_t csc_ff_yuv601_2_rgb601 = {
+		.type = KMS_COLOROP_CSC_FF,
+		.name = "CSC FF YUV601 to RGB601",
+		.csc_ff_info = {
+			.csc_ff = KMS_COLOROP_CSC_FF_YUV601_RGB601,
+		},
+	};
 
 	struct {
 		const char *name;
 		const color_t *fb_colors;
 		const color_t *exp_colors;
 		kms_colorop_t *colorops[MAX_COLOROPS];
+		bool verify_crc;
 	} plane_colorops_tests[] = {
 		{ .name = "lut1d",
 		  .fb_colors = colors_rgb,
 		  .exp_colors = colors_rgb,
 		  .colorops = { &lut1d_max, NULL },
+		  .verify_crc = true,
 		},
 		{ .name = "lut1d-pre-ctm3x4",
 		  .fb_colors = colors_rgb,
 		  .exp_colors = colors_rgb,
 		  .colorops = { &lut1d_max, &ctm_3x4_linear, NULL },
+		 .verify_crc = true,
 		},
 		{ .name = "lut1d-post-ctm3x4",
 		  .fb_colors = colors_rgb,
 		  .exp_colors = colors_rgb,
 		  .colorops = { &ctm_3x4_linear, &lut1d_max, NULL },
+		  .verify_crc = true,
 		},
 		{ .name = "ctm3x4",
 		  .fb_colors = colors_rgb,
 		  .exp_colors = colors_red_to_blue,
 		  .colorops = { &ctm_3x4, NULL },
+		  .verify_crc = true,
 		},
 		{ .name = "lut1d-ctm3x4",
 		  .fb_colors = colors_rgb,
 		  .exp_colors = colors_red_to_blue,
 		  .colorops = { &lut1d_max, &ctm_3x4, NULL },
+		  .verify_crc = true,
 		},
 		{ .name = "ctm3x4-lut1d",
 		  .fb_colors = colors_rgb,
 		  .exp_colors = colors_red_to_blue,
 		  .colorops = { &ctm_3x4, &lut1d_max, NULL },
+		  .verify_crc = true,
 		},
 		{ .name = "lut1d-lut1d",
 		  .fb_colors = colors_rgb,
 		  .exp_colors = colors_rgb,
 		  .colorops = { &lut1d_linear, &lut1d_max, NULL },
+		  .verify_crc = true,
 		},
 		{ .name = "lut1d-ctm3x4-lut1d",
 		  .fb_colors = colors_rgb,
 		  .exp_colors = colors_red_to_blue,
 		  .colorops = { &lut1d_linear, &ctm_3x4, &lut1d_max, NULL },
+		  .verify_crc = true,
 		},
 		{ .name = "lut3d-green-only",
 		  .fb_colors = colors_red_and_green,
 		  .exp_colors = colors_only_green,
 		  .colorops = { &lut3d, NULL },
+		  .verify_crc = true,
+		},
+		{
+		 .name = "csc-ff-yuv601_2_rgb601",
+		 .fb_colors = colors_rgb,
+		 .exp_colors = colors_rgb,
+		 .colorops = {&csc_ff_yuv601_2_rgb601, NULL},
+		 .verify_crc = false,
 		},
 	};
 
@@ -340,7 +369,8 @@ run_tests_for_plane(data_t *data)
 				test_plane_colorops(data, crtc,
 						    plane_colorops_tests[i].fb_colors,
 						    plane_colorops_tests[i].exp_colors,
-						    plane_colorops_tests[i].colorops);
+						    plane_colorops_tests[i].colorops,
+						    plane_colorops_tests[i].verify_crc);
 				test_cleanup(data);
 			}
 		}
