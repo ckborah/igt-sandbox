@@ -150,8 +150,6 @@ static void _test_plane_colorops(data_t *data,
 				 DRM_FORMAT_MOD_LINEAR,
 				 &fb));
 
-	/* Hardware pipeline CRC */
-	set_color_pipeline(display, plane, colorops, color_pipeline);
 	/*
 	 * Use flat colors only when the pipeline
 	 * contains CTM colorops exclusively.
@@ -161,7 +159,13 @@ static void _test_plane_colorops(data_t *data,
 	else
 		paint_gradient_rectangles(data, mode, fb_colors, &fb);
 
+	printf("Setting FB\n");
 	igt_plane_set_fb(plane, &fb);
+	igt_display_commit_atomic(&data->display, 0, NULL);
+	
+	/* Hardware pipeline CRC */
+	printf("Setting Pipeline\n");
+	set_color_pipeline(display, plane, colorops, color_pipeline);
 	igt_display_commit_atomic(&data->display, 0, NULL);
 
 	if (verify_crc) {
