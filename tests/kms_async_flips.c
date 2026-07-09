@@ -64,9 +64,10 @@
  * Description: Stress test async flips by flipping between a green and red
  *              framebuffer for 30 seconds without any correctness checks
  *
- * SUBTEST: async-flip-stress
- * Description: Stress test async flips by flipping between a green and red
- *              framebuffer for 30 seconds without any correctness checks
+ * SUBTEST: async-flip-stress-with-tear-reduction
+ * Description: Stress test async flips with the ASYNC_SMOOTHNESS CRTC property
+ *              set to the level given by --smoothness (default 2) while flipping
+ *              between a green and red framebuffer for 30 seconds
  *
  * SUBTEST: invalid-async-flip
  * Description: Negative case to verify if changes in fb are rejected from kernel as expected
@@ -166,6 +167,11 @@ struct format_mod {
 };
 
 #define STRESS_RUN_TIME 30
+
+#define DEFAULT_ASYNC_SMOOTHNESS 2
+
+/* ASYNC_SMOOTHNESS level for async-flip-stress-with-tear-reduction subtest */
+static int opt_smoothness = DEFAULT_ASYNC_SMOOTHNESS;
 
 static int min_flips_per_frame(unsigned int refresh_rate)
 {
@@ -932,6 +938,37 @@ static void test_async_flip_stress(data_t *data)
 	igt_remove_fb(data->drm_fd, &red_fb);
 }
 
+static void test_async_flip_stress_tear_reduction(data_t *data)
+{
+	drmModePropertyPtr prop;
+	uint64_t min_smoothness, max_smoothness;
+
+	igt_skip_on_f(!igt_crtc_has_prop(data->crtc, IGT_CRTC_ASYNC_SMOOTHNESS),
+		      "ASYNC_SMOOTHNESS property not supported on this CRTC\n");
+
+	prop = drmModeGetProperty(data->drm_fd,
+				  data->crtc->props[IGT_CRTC_ASYNC_SMOOTHNESS]);
+	igt_assert(prop);
+	min_smoothness = prop->values[0];
+	max_smoothness = prop->values[1];
+	drmModeFreeProperty(prop);
+
+	igt_assert_f(opt_smoothness >= (int)min_smoothness &&
+		     opt_smoothness <= (int)max_smoothness,
+		     "Requested smoothness %d out of ASYNC_SMOOTHNESS range [%d, %d]\n",
+		     opt_smoothness, (int)min_smoothness, (int)max_smoothness);
+
+	igt_info("Using ASYNC_SMOOTHNESS level %d\n", opt_smoothness);
+
+	igt_crtc_set_prop_value(data->crtc, IGT_CRTC_ASYNC_SMOOTHNESS,
+				opt_smoothness);
+
+	test_async_flip_stress(data);
+
+	/* Restore the property to its default */
+	igt_crtc_set_prop_value(data->crtc, IGT_CRTC_ASYNC_SMOOTHNESS, 0);
+}
+
 static void run_test(data_t *data, void (*test)(data_t *))
 {
 	igt_crtc_t *crtc;
@@ -1099,7 +1136,27 @@ static void run_test_with_modifiers(data_t *data, void (*test)(data_t *))
 
 static data_t data;
 
-int igt_main()
+static int opt_handler(int opt, int opt_index, void *_data)
+{
+	switch (opt) {
+	case 's':
+		opt_smoothness = atoi(optarg);
+		break;
+	}
+
+	return IGT_OPT_HANDLER_SUCCESS;
+}
+
+static const struct option long_opts[] = {
+	{ .name = "smoothness", .has_arg = required_argument, .val = 's', },
+	{}
+};
+
+static const char help_str[] =
+	"  --smoothness <n>\tASYNC_SMOOTHNESS level for the "
+	"async-flip-stress-with-tear-reduction subtest (default 2)\n";
+
+int igt_main_args("s:", long_opts, help_str, opt_handler, NULL)
 {
 	int i;
 
@@ -1294,6 +1351,14 @@ int igt_main()
 	igt_subtest_with_dynamic("async-flip-stress") {
 		test_init_ops(&data);
 		run_test(&data, test_async_flip_stress);
+	}
+
+	igt_describe("Stress test async flips with the ASYNC_SMOOTHNESS CRTC property "
+		     "enabled for tear reduction");
+	igt_subtest_with_dynamic("async-flip-stress-with-tear-reduction") {
+		test_init_ops(&data);
+		igt_require(is_intel_device(data.drm_fd));
+		run_test(&data, test_async_flip_stress_tear_reduction);
 	}
 
 	igt_fixture() {
