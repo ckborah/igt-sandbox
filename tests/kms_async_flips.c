@@ -60,6 +60,14 @@
  * SUBTEST: crc
  * Description: Use CRC to verify async flip scans out the correct framebuffer
  *
+ * SUBTEST: async-flip-stress
+ * Description: Stress test async flips by flipping between a green and red
+ *              framebuffer for 30 seconds without any correctness checks
+ *
+ * SUBTEST: async-flip-stress
+ * Description: Stress test async flips by flipping between a green and red
+ *              framebuffer for 30 seconds without any correctness checks
+ *
  * SUBTEST: invalid-async-flip
  * Description: Negative case to verify if changes in fb are rejected from kernel as expected
  *
@@ -156,6 +164,8 @@ struct format_mod {
 	uint64_t modifier;
 	uint32_t format;
 };
+
+#define STRESS_RUN_TIME 30
 
 static int min_flips_per_frame(unsigned int refresh_rate)
 {
@@ -869,6 +879,59 @@ static void test_crc(data_t *data)
 	igt_assert_lt(data->frame_count * 2, data->flip_count);
 }
 
+static void test_async_flip_stress(data_t *data)
+{
+	unsigned int frame = 0;
+	struct timeval start, end, diff;
+	struct igt_fb green_fb, red_fb;
+	drmModeModeInfo *mode;
+	uint32_t width, height;
+	int64_t elapsed_us;
+	int ret;
+
+	igt_display_commit2(&data->display,
+			    data->display.is_atomic ? COMMIT_ATOMIC : COMMIT_LEGACY);
+
+	mode = igt_output_get_mode(data->output);
+	width = mode->hdisplay;
+	height = mode->vdisplay;
+
+	igt_create_color_fb(data->drm_fd, width, height, DRM_FORMAT_XRGB8888,
+			    DRM_FORMAT_MOD_LINEAR, 0.0, 1.0, 0.0, &green_fb);
+	igt_create_color_fb(data->drm_fd, width, height, DRM_FORMAT_XRGB8888,
+			    DRM_FORMAT_MOD_LINEAR, 1.0, 0.0, 0.0, &red_fb);
+
+	ret = drmModeSetCrtc(data->drm_fd, data->crtc->crtc_id,
+			     green_fb.fb_id, 0, 0,
+			     &data->output->config.connector->connector_id, 1, mode);
+	igt_assert_eq(ret, 0);
+
+	gettimeofday(&start, NULL);
+	do {
+		struct igt_fb *next = (frame & 1) ? &red_fb : &green_fb;
+
+		ret = drmModePageFlip(data->drm_fd, data->crtc->crtc_id,
+				     next->fb_id,
+				     DRM_MODE_PAGE_FLIP_ASYNC | DRM_MODE_PAGE_FLIP_EVENT,
+				     data);
+		igt_assert_eq(ret, 0);
+
+		wait_flip_event(data);
+
+		frame++;
+		gettimeofday(&end, NULL);
+		timersub(&end, &start, &diff);
+	} while (diff.tv_sec < STRESS_RUN_TIME);
+
+	elapsed_us = diff.tv_sec * 1000000LL + diff.tv_usec;
+	igt_info("Completed %u async flips in %ld.%06ld seconds (avg %.3f ms/flip)\n",
+		 frame, (long)diff.tv_sec, (long)diff.tv_usec,
+		 frame ? (elapsed_us / 1000.0) / frame : 0.0);
+
+	igt_remove_fb(data->drm_fd, &green_fb);
+	igt_remove_fb(data->drm_fd, &red_fb);
+}
+
 static void run_test(data_t *data, void (*test)(data_t *))
 {
 	igt_crtc_t *crtc;
@@ -1224,6 +1287,13 @@ int igt_main()
 		run_test(&data, test_async_flip);
 		data.dpms = false;
 		data.single_pipe = false;
+	}
+
+	igt_describe("Stress test async flips by flipping between green and red "
+		     "framebuffers for 30 seconds");
+	igt_subtest_with_dynamic("async-flip-stress") {
+		test_init_ops(&data);
+		run_test(&data, test_async_flip_stress);
 	}
 
 	igt_fixture() {
