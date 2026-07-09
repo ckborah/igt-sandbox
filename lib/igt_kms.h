@@ -168,6 +168,7 @@ enum igt_atomic_crtc_properties {
        IGT_CRTC_VRR_ENABLED,
        IGT_CRTC_SCALING_FILTER,
        IGT_CRTC_SHARPNESS_STRENGTH,
+       IGT_CRTC_ASYNC_SMOOTHNESS,
        IGT_NUM_CRTC_PROPS
 };
 
