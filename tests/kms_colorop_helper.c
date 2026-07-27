@@ -200,6 +200,14 @@ kms_colorop_t kms_colorop_3dlut_17_12_rgb = {
 	.transform = &igt_color_3dlut_17_12_rgb,
 };
 
+const char * const kms_colorop_fixed_matrix_names[KMS_COLOROP_FIXED_MATRIX_NUM_ENUMS] = {
+	[KMS_COLOROP_FIXED_MATRIX_YCBCR601_FULL_RGB] = "YCbCr 601 Full to RGB",
+	[KMS_COLOROP_FIXED_MATRIX_YCBCR709_FULL_RGB] = "YCbCr 709 Full to RGB",
+	[KMS_COLOROP_FIXED_MATRIX_YCBCR2020_NC_FULL_RGB] = "YCbCr 2020 NC Full to RGB",
+	[KMS_COLOROP_FIXED_MATRIX_YCBCR_LIMITED_FULL] = "YCbCr limited to full",
+	[KMS_COLOROP_FIXED_MATRIX_RGB709_RGB2020] = "RGB709 to RGB2020",
+};
+
 static bool can_use_colorop(igt_display_t *display, igt_colorop_t *colorop, kms_colorop_t *desired)
 {
 	switch (desired->type) {
@@ -218,6 +226,13 @@ static bool can_use_colorop(igt_display_t *display, igt_colorop_t *colorop, kms_
 		return (igt_colorop_get_prop(display, colorop, IGT_COLOROP_TYPE) == DRM_COLOROP_MULTIPLIER);
 	case KMS_COLOROP_LUT3D:
 		return (igt_colorop_get_prop(display, colorop, IGT_COLOROP_TYPE) == DRM_COLOROP_3D_LUT);
+	case KMS_COLOROP_FIXED_MATRIX:
+		if (igt_colorop_get_prop(display, colorop, IGT_COLOROP_TYPE) == DRM_COLOROP_FIXED_MATRIX &&
+		    igt_colorop_has_prop(colorop, IGT_COLOROP_FIXED_MATRIX_TYPE) &&
+		    igt_colorop_try_prop_enum(colorop, IGT_COLOROP_FIXED_MATRIX_TYPE,
+					    kms_colorop_fixed_matrix_names[desired->fixed_matrix_info.fixed_matrix]))
+			return true;
+		return false;
 	default:
 		return false;
 	}
@@ -362,6 +377,10 @@ static void set_colorop(igt_display_t *display, kms_colorop_t *colorop)
 
 		configure_3dlut(display, colorop, lut_size);
 		break;
+	case KMS_COLOROP_FIXED_MATRIX:
+		igt_colorop_set_prop_enum(colorop->colorop, IGT_COLOROP_FIXED_MATRIX_TYPE,
+					  kms_colorop_fixed_matrix_names[colorop->fixed_matrix_info.fixed_matrix]);
+		break;
 	default:
 		igt_fail(IGT_EXIT_FAILURE);
 	}
@@ -416,6 +435,7 @@ static void reset_colorop(kms_colorop_t *colorop)
 		igt_colorop_set_prop_value(colorop->colorop, IGT_COLOROP_MULTIPLIER, 1);
 		break;
 	case KMS_COLOROP_ENUMERATED_LUT1D:
+	case KMS_COLOROP_FIXED_MATRIX:
 	default:
 		return;
 	}

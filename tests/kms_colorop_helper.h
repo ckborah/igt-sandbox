@@ -22,7 +22,8 @@ typedef enum kms_colorop_type {
 	KMS_COLOROP_CUSTOM_LUT1D,
 	KMS_COLOROP_CTM_3X4,
 	KMS_COLOROP_MULTIPLIER,
-	KMS_COLOROP_LUT3D
+	KMS_COLOROP_LUT3D,
+	KMS_COLOROP_FIXED_MATRIX,
 } kms_colorop_type_t;
 
 typedef enum kms_colorop_lut1d_tf {
@@ -50,6 +51,19 @@ typedef struct kms_colorop_lut3d_info {
 	enum drm_colorop_lut3d_interpolation_type interpolation;
 } kms_colorop_lut3d_info_t;
 
+typedef enum kms_colorop_fixed_matrix {
+	KMS_COLOROP_FIXED_MATRIX_YCBCR601_FULL_RGB,
+	KMS_COLOROP_FIXED_MATRIX_YCBCR709_FULL_RGB,
+	KMS_COLOROP_FIXED_MATRIX_YCBCR2020_NC_FULL_RGB,
+	KMS_COLOROP_FIXED_MATRIX_YCBCR_LIMITED_FULL,
+	KMS_COLOROP_FIXED_MATRIX_RGB709_RGB2020,
+	KMS_COLOROP_FIXED_MATRIX_NUM_ENUMS
+} kms_colorop_fixed_matrix_t;
+
+typedef struct kms_colorop_fixed_matrix_info {
+	kms_colorop_fixed_matrix_t fixed_matrix;
+} kms_colorop_fixed_matrix_info_t;
+
 typedef struct kms_colorop {
 	kms_colorop_type_t type;
 
@@ -60,6 +74,8 @@ typedef struct kms_colorop {
 		const igt_matrix_3x4_t *matrix_3x4;
 		double multiplier;
 	};
+
+	kms_colorop_fixed_matrix_info_t fixed_matrix_info;
 
 	kms_colorop_lut3d_info_t lut3d_info;
 
@@ -94,6 +110,8 @@ extern kms_colorop_t kms_colorop_ctm_3x4_bt709_dec;
 extern kms_colorop_t kms_colorop_multiply_125;
 extern kms_colorop_t kms_colorop_multiply_inv_125;
 extern kms_colorop_t kms_colorop_3dlut_17_12_rgb;
+
+extern const char * const kms_colorop_fixed_matrix_names[KMS_COLOROP_FIXED_MATRIX_NUM_ENUMS];
 
 igt_colorop_t *get_color_pipeline(igt_display_t *display,
 			          igt_plane_t *plane,
