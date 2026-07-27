@@ -34,6 +34,58 @@
  * @lut3d-green-only:		3D LUT
  */
 
+/**
+ * SUBTEST: plane-fixed-matrix-%s
+ * Description: Test FIXED_MATRIX colorop for color space conversion: %arg[1].
+ *
+ * arg[1]:
+ *
+ * @yuv601-rgb601:		YUV BT.601 to RGB BT.601
+ * @yuv709-rgb709:		YUV BT.709 to RGB BT.709
+ * @yuv2020-rgb2020:		YUV BT.2020 to RGB BT.2020
+ * @rgb709-rgb2020:		RGB BT.709 to RGB BT.2020
+ */
+
+/**
+ * SUBTEST: plane-fixed-matrix-lut1d-%s
+ * Description: Test FIXED_MATRIX + 1D LUT pipeline: %arg[1].
+ *
+ * arg[1]:
+ *
+ * @yuv601-rgb601:		YUV BT.601 to RGB BT.601
+ * @yuv709-rgb709:		YUV BT.709 to RGB BT.709
+ * @yuv2020-rgb2020:		YUV BT.2020 to RGB BT.2020
+ */
+
+/**
+ * SUBTEST: plane-lut1d-fixed-matrix-lut1d-%s
+ * Description: Test 1D LUT + FIXED_MATRIX + 1D LUT pipeline: %arg[1].
+ *
+ * arg[1]:
+ *
+ * @rgb709-rgb2020:		RGB BT.709 to RGB BT.2020
+ */
+
+/**
+ * SUBTEST: plane-yuv-range-correct-%s
+ * Description: Test YCbCr range correction colorop: %arg[1].
+ *
+ * arg[1]:
+ *
+ * @yuv-lim:			YCbCr limited range (conversion active)
+ */
+
+/**
+ * SUBTEST: plane-yuv-range-correct-fixed-matrix-%s
+ * Description: Test YCbCr range correction + FIXED_MATRIX pipeline: %arg[1].
+ *
+ * arg[1]:
+ *
+ * @bt601-yuv-lim:		YCbCr BT.601 limited range with CSC
+ * @bt709-yuv-lim:		YCbCr BT.709 limited range with CSC
+ * @bt2020-yuv-lim:		YCbCr BT.2020 limited range with CSC
+ */
+
 IGT_TEST_DESCRIPTION("Test to validate DRM plane color pipeline using Chamelium frame capture instead of pipe CRC");
 
 static void test_cleanup(data_t *data)
@@ -345,6 +397,290 @@ run_tests_for_plane(data_t *data)
 	}
 }
 
+static void
+_test_plane_fixed_matrix_colorops(data_t *data,
+				  igt_plane_t *plane,
+				  const color_t *fb_colors,
+				  kms_colorop_t *colorops[],
+				  uint32_t input_format,
+				  enum igt_color_encoding encoding,
+				  enum igt_color_range range,
+				  struct chamelium_port *port)
+{
+	igt_display_t *display = &data->display;
+	drmModeModeInfo *mode = data->mode;
+	igt_colorop_t *color_pipeline;
+	struct igt_fb fb, fbref;
+	struct chamelium_frame_dump *frame;
+	bool is_yuv = igt_format_is_yuv(input_format);
+	bool ret;
+
+	color_pipeline = get_color_pipeline(display, plane, colorops);
+	igt_skip_on(!color_pipeline);
+
+	/* Create HW input framebuffer (YUV or RGB) */
+	if (is_yuv)
+		igt_assert(igt_create_fb_with_bo_size(data->drm_fd,
+						      mode->hdisplay,
+						      mode->vdisplay,
+						      input_format,
+						      DRM_FORMAT_MOD_LINEAR,
+						      encoding, range,
+						      &fb, 0, 0));
+	else
+		igt_assert(igt_create_fb(data->drm_fd,
+					 mode->hdisplay,
+					 mode->vdisplay,
+					 input_format,
+					 DRM_FORMAT_MOD_LINEAR,
+					 &fb));
+
+	/* Paint the input fb with test colors */
+	paint_rectangles(data, mode, fb_colors, &fb);
+
+	/*
+	 * Software reference: convert the input fb through igt_fb_convert()
+	 * which internally applies igt_ycbcr_to_rgb_matrix(). This matches
+	 * what the HW FIXED_MATRIX colorop should produce.
+	 * Chamelium analog comparison tolerates HW vs SW rounding differences.
+	 */
+	igt_fb_convert(&fbref, &fb, DRM_FORMAT_XRGB8888, DRM_FORMAT_MOD_LINEAR);
+
+	/* Hardware path */
+	set_color_pipeline(display, plane, colorops, color_pipeline);
+
+	igt_plane_set_fb(plane, &fb);
+	igt_display_commit_atomic(&data->display, 0, NULL);
+
+	chamelium_port_wait_video_input_stable(data->chamelium, port, 5);
+	chamelium_capture(data->chamelium, port, 0, 0, 0, 0, 1);
+
+	frame = chamelium_read_captured_frame(data->chamelium, 0);
+
+	ret = chamelium_frame_match_or_dump(data->chamelium, port, frame,
+					    &fbref, CHAMELIUM_CHECK_ANALOG);
+	igt_assert(ret);
+
+	chamelium_destroy_frame_dump(frame);
+
+	/* Cleanup */
+	set_color_pipeline_bypass(plane);
+	reset_colorops(colorops);
+	igt_plane_set_fb(plane, NULL);
+	igt_display_commit_atomic(&data->display, 0, NULL);
+
+	igt_remove_fb(data->drm_fd, &fb);
+	igt_remove_fb(data->drm_fd, &fbref);
+}
+
+static void
+test_plane_fixed_matrix_colorops(data_t *data, igt_crtc_t *crtc,
+				 const color_t *fb_colors,
+				 kms_colorop_t *colorops[],
+				 uint32_t input_format,
+				 enum igt_color_encoding encoding,
+				 enum igt_color_range range,
+				 int port_idx)
+{
+	int n_planes = crtc->n_planes;
+	igt_output_t *output = data->output;
+	igt_plane_t *plane;
+
+	for (int plane_id = 0; plane_id < n_planes; plane_id++) {
+		plane = igt_output_get_plane(output, plane_id);
+
+		if (!igt_plane_has_prop(plane, IGT_PLANE_COLOR_PIPELINE))
+			continue;
+
+		igt_dynamic_f("pipe-%s-plane-%u", kmstest_pipe_name(crtc->pipe), plane_id)
+			_test_plane_fixed_matrix_colorops(data, plane,
+							  fb_colors,
+							  colorops, input_format,
+							  encoding, range,
+							  data->ports[port_idx]);
+	}
+}
+
+static void
+run_tests_for_fixed_matrix(data_t *data)
+{
+	igt_crtc_t *crtc;
+	igt_output_t *output = NULL;
+	int port_idx = 0;
+	static const color_t colors_rgb[] = {
+		{ 1.0, 0.0, 0.0 },
+		{ 0.0, 1.0, 0.0 },
+		{ 0.0, 0.0, 1.0 },
+	};
+	kms_colorop_t lut1d_linear = {
+		.type = KMS_COLOROP_CUSTOM_LUT1D,
+		.name = "1D LUT (linear)",
+		.lut1d = &igt_1dlut_linear,
+		.transform = &igt_color_linear,
+	};
+	kms_colorop_t fixed_matrix_yuv601_rgb601 = {
+		.type = KMS_COLOROP_FIXED_MATRIX,
+		.name = "FIXED_MATRIX YUV601 to RGB601",
+		.fixed_matrix_info = { .fixed_matrix = KMS_COLOROP_FIXED_MATRIX_YCBCR601_FULL_RGB },
+	};
+	kms_colorop_t fixed_matrix_yuv709_rgb709 = {
+		.type = KMS_COLOROP_FIXED_MATRIX,
+		.name = "FIXED_MATRIX YUV709 to RGB709",
+		.fixed_matrix_info = { .fixed_matrix = KMS_COLOROP_FIXED_MATRIX_YCBCR709_FULL_RGB },
+	};
+	kms_colorop_t fixed_matrix_yuv2020_rgb2020 = {
+		.type = KMS_COLOROP_FIXED_MATRIX,
+		.name = "FIXED_MATRIX YUV2020 to RGB2020",
+		.fixed_matrix_info = { .fixed_matrix = KMS_COLOROP_FIXED_MATRIX_YCBCR2020_NC_FULL_RGB },
+	};
+	kms_colorop_t fixed_matrix_rgb709_rgb2020 = {
+		.type = KMS_COLOROP_FIXED_MATRIX,
+		.name = "FIXED_MATRIX RGB709 to RGB2020",
+		.fixed_matrix_info = { .fixed_matrix = KMS_COLOROP_FIXED_MATRIX_RGB709_RGB2020 },
+	};
+	kms_colorop_t fixed_matrix_ycbcr_limited_full = {
+		.type = KMS_COLOROP_FIXED_MATRIX,
+		.name = "FIXED_MATRIX YCbCr limited to full",
+		.fixed_matrix_info = { .fixed_matrix = KMS_COLOROP_FIXED_MATRIX_YCBCR_LIMITED_FULL },
+	};
+
+	struct {
+		const char *name;
+		const char *subtest_prefix;
+		const color_t *fb_colors;
+		kms_colorop_t *colorops[MAX_COLOROPS];
+		uint32_t input_format;
+		enum igt_color_encoding encoding;
+		enum igt_color_range range;
+	} fixed_matrix_tests[] = {
+		{ .name = "yuv601-rgb601",
+		  .subtest_prefix = "plane-fixed-matrix",
+		  .fb_colors = colors_rgb,
+		  .colorops = { &fixed_matrix_yuv601_rgb601, NULL },
+		  .input_format = DRM_FORMAT_YUYV,
+		  .encoding = IGT_COLOR_YCBCR_BT601,
+		  .range = IGT_COLOR_YCBCR_FULL_RANGE,
+		},
+		{ .name = "yuv709-rgb709",
+		  .subtest_prefix = "plane-fixed-matrix",
+		  .fb_colors = colors_rgb,
+		  .colorops = { &fixed_matrix_yuv709_rgb709, NULL },
+		  .input_format = DRM_FORMAT_YUYV,
+		  .encoding = IGT_COLOR_YCBCR_BT709,
+		  .range = IGT_COLOR_YCBCR_FULL_RANGE,
+		},
+		{ .name = "yuv2020-rgb2020",
+		  .subtest_prefix = "plane-fixed-matrix",
+		  .fb_colors = colors_rgb,
+		  .colorops = { &fixed_matrix_yuv2020_rgb2020, NULL },
+		  .input_format = DRM_FORMAT_YUYV,
+		  .encoding = IGT_COLOR_YCBCR_BT2020,
+		  .range = IGT_COLOR_YCBCR_FULL_RANGE,
+		},
+		{ .name = "rgb709-rgb2020",
+		  .subtest_prefix = "plane-fixed-matrix",
+		  .fb_colors = colors_rgb,
+		  .colorops = { &fixed_matrix_rgb709_rgb2020, NULL },
+		  .input_format = DRM_FORMAT_XRGB8888,
+		},
+		{ .name = "yuv601-rgb601",
+		  .subtest_prefix = "plane-fixed-matrix-lut1d",
+		  .fb_colors = colors_rgb,
+		  .colorops = { &fixed_matrix_yuv601_rgb601, &lut1d_linear, NULL },
+		  .input_format = DRM_FORMAT_YUYV,
+		  .encoding = IGT_COLOR_YCBCR_BT601,
+		  .range = IGT_COLOR_YCBCR_FULL_RANGE,
+		},
+		{ .name = "yuv709-rgb709",
+		  .subtest_prefix = "plane-fixed-matrix-lut1d",
+		  .fb_colors = colors_rgb,
+		  .colorops = { &fixed_matrix_yuv709_rgb709, &lut1d_linear, NULL },
+		  .input_format = DRM_FORMAT_YUYV,
+		  .encoding = IGT_COLOR_YCBCR_BT709,
+		  .range = IGT_COLOR_YCBCR_FULL_RANGE,
+		},
+		{ .name = "yuv2020-rgb2020",
+		  .subtest_prefix = "plane-fixed-matrix-lut1d",
+		  .fb_colors = colors_rgb,
+		  .colorops = { &fixed_matrix_yuv2020_rgb2020, &lut1d_linear, NULL },
+		  .input_format = DRM_FORMAT_YUYV,
+		  .encoding = IGT_COLOR_YCBCR_BT2020,
+		  .range = IGT_COLOR_YCBCR_FULL_RANGE,
+		},
+		{ .name = "rgb709-rgb2020",
+		  .subtest_prefix = "plane-lut1d-fixed-matrix-lut1d",
+		  .fb_colors = colors_rgb,
+		  .colorops = { &lut1d_linear, &fixed_matrix_rgb709_rgb2020, &lut1d_linear, NULL },
+		  .input_format = DRM_FORMAT_XRGB8888,
+		},
+		{ .name = "yuv-lim",
+		  .subtest_prefix = "plane-yuv-range-correct",
+		  .fb_colors = colors_rgb,
+		  .colorops = { &fixed_matrix_ycbcr_limited_full, NULL },
+		  .input_format = DRM_FORMAT_YUYV,
+		  .encoding = IGT_COLOR_YCBCR_BT709,
+		  .range = IGT_COLOR_YCBCR_LIMITED_RANGE,
+		},
+		{ .name = "bt601-yuv-lim",
+		  .subtest_prefix = "plane-yuv-range-correct-fixed-matrix",
+		  .fb_colors = colors_rgb,
+		  .colorops = { &fixed_matrix_ycbcr_limited_full, &fixed_matrix_yuv601_rgb601, NULL },
+		  .input_format = DRM_FORMAT_YUYV,
+		  .encoding = IGT_COLOR_YCBCR_BT601,
+		  .range = IGT_COLOR_YCBCR_LIMITED_RANGE,
+		},
+		{ .name = "bt709-yuv-lim",
+		  .subtest_prefix = "plane-yuv-range-correct-fixed-matrix",
+		  .fb_colors = colors_rgb,
+		  .colorops = { &fixed_matrix_ycbcr_limited_full, &fixed_matrix_yuv709_rgb709, NULL },
+		  .input_format = DRM_FORMAT_YUYV,
+		  .encoding = IGT_COLOR_YCBCR_BT709,
+		  .range = IGT_COLOR_YCBCR_LIMITED_RANGE,
+		},
+		{ .name = "bt2020-yuv-lim",
+		  .subtest_prefix = "plane-yuv-range-correct-fixed-matrix",
+		  .fb_colors = colors_rgb,
+		  .colorops = { &fixed_matrix_ycbcr_limited_full, &fixed_matrix_yuv2020_rgb2020, NULL },
+		  .input_format = DRM_FORMAT_YUYV,
+		  .encoding = IGT_COLOR_YCBCR_BT2020,
+		  .range = IGT_COLOR_YCBCR_LIMITED_RANGE,
+		},
+	};
+
+	for (int i = 0; i < ARRAY_SIZE(fixed_matrix_tests); i++) {
+		igt_describe_f("Test FIXED_MATRIX pipeline: %s-%s",
+			       fixed_matrix_tests[i].subtest_prefix,
+			       fixed_matrix_tests[i].name);
+		igt_subtest_with_dynamic_f("%s-%s",
+					   fixed_matrix_tests[i].subtest_prefix,
+					   fixed_matrix_tests[i].name) {
+			for_each_crtc_with_single_output(&data->display, crtc,
+							 output) {
+				data->output = output;
+
+				if (!crtc_output_combo_valid(data, crtc))
+					continue;
+
+				port_idx = test_setup(data, crtc);
+				if (port_idx < 0) {
+					test_cleanup(data);
+					continue;
+				}
+
+				test_plane_fixed_matrix_colorops(data, crtc,
+								 fixed_matrix_tests[i].fb_colors,
+								 fixed_matrix_tests[i].colorops,
+								 fixed_matrix_tests[i].input_format,
+								 fixed_matrix_tests[i].encoding,
+								 fixed_matrix_tests[i].range,
+								 port_idx);
+
+				test_cleanup(data);
+			}
+		}
+	}
+}
+
 int igt_main()
 {
 	int i;
@@ -403,6 +739,9 @@ int igt_main()
 
 	igt_subtest_group()
 		run_tests_for_plane(&data);
+
+	igt_subtest_group()
+		run_tests_for_fixed_matrix(&data);
 
 	igt_fixture() {
 		igt_display_fini(&data.display);
