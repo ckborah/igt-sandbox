@@ -244,8 +244,8 @@ hdmi_inject_audio(int drm_fd, drmModeConnector *connector)
 static drmModeModeInfo mode_reduced = {
 	.clock = 119000,
 	.hdisplay = 2560, .hsync_start = 2608, .hsync_end = 2640, .htotal = 2720,
-	.vdisplay = 1080, .vsync_start = 1083, .vsync_end = 1088, .vtotal = 1094,
-	.vrefresh = 40,
+	.vdisplay = 1080, .vsync_start = 1083, .vsync_end = 1088, .vtotal = 1459,
+	.vrefresh = 30,
 	.flags = DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC,
 	.name = "2560x1080_reduced",
 };
