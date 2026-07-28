@@ -50,12 +50,12 @@
  * Description: Make sure that audio information exposed by ALSA match the forced
  *              EDID.
  *
- * SUBTEST: audio-bw-prune-reduced-blanking
+ * SUBTEST: audio-bw-prune
  * Description: Force a reduced-blanking 2560x1080 mode whose hblank cannot carry
  *              high audio sample rates, and check that the kernel prunes the
  *              affected rates from the ELD and drops SADs that lose all rates.
  *
- * SUBTEST: audio-bw-no-prune-standard-blanking
+ * SUBTEST: audio-bw-no-prune
  * Description: Force a standard-blanking 2560x1080 mode with ample hblank, and
  *              check that no SAD or sample rate is pruned from the ELD.
  */
@@ -561,11 +561,11 @@ int igt_main()
 
 	igt_describe("Reduced-blanking mode: high audio sample rates and "
 		     "rate-empty SADs are pruned from the ELD.");
-	igt_subtest("audio-bw-prune-reduced-blanking")
+	igt_subtest("audio-bw-prune")
 		hdmi_audio_bw_prune(drm_fd, connector);
 
 	igt_describe("Standard-blanking mode: nothing is pruned from the ELD.");
-	igt_subtest("audio-bw-no-prune-standard-blanking")
+	igt_subtest("audio-bw-no-prune")
 		hdmi_audio_bw_no_prune(drm_fd, connector);
 
 	igt_fixture() {
