@@ -363,6 +363,24 @@ static const struct eld_sad *find_sad(const struct eld_entry *eld, int channels)
 	return NULL;
 }
 
+static const char *rate_mask_str(uint8_t mask, char *buf, size_t sz)
+{
+	const char *rates[] = { "32k", "44.1k", "48k", "88.2k", "96k", "176.4k", "192k" };
+	size_t pos = 0;
+	int i;
+
+	for (i = 0; i < 7; i++) {
+		if (mask & (1 << i)) {
+			if (pos > 0)
+				pos += snprintf(buf + pos, sz - pos, "|");
+			pos += snprintf(buf + pos, sz - pos, "%s", rates[i]);
+		}
+	}
+	if (pos == 0)
+		snprintf(buf, sz, "(empty)");
+	return buf;
+}
+
 /*
  * Force the EDID + mode, modeset, and return the ELD ALSA exposes. The pipe and
  * audio encoder must be enabled for the ELD to appear, so a framebuffer is set.
@@ -424,34 +442,47 @@ static void hdmi_audio_bw_prune(int drm_fd, drmModeConnector *connector)
 	struct eld_entry eld = {};
 	const struct eld_sad *sad;
 	unsigned int i, expect_len = 0;
+	char buf_expected[64], buf_received[64];
 
 	igt_require(is_intel_device(drm_fd));
 	igt_require(eld_is_supported());
 
 	get_eld_for_mode(drm_fd, connector, &mode_reduced, &eld);
 
+	igt_info("ELD SAD count: received %u\n", (unsigned int)eld.sads_len);
+
 	for (i = 0; i < NUM_SADS; i++)
 		if (sad_descs[i].rates_reduced)
 			expect_len++;
 
-	igt_assert_eq(eld.sads_len, expect_len);
+	igt_info("  expected %u (after pruning)\n", expect_len);
 
 	for (i = 0; i < NUM_SADS; i++) {
 		int ch = sad_descs[i].channels;
 
-		sad = find_sad(&eld, ch);
+		igt_info("SAD[%d] %dch: ", i, ch);
 
 		if (sad_descs[i].rates_reduced == 0) {
+			igt_info("expected removal\n");
+			sad = find_sad(&eld, ch);
 			igt_assert_f(!sad,
-				     "%dch SAD should have been removed but is present\n",
-				     ch);
+				     "%dch SAD should have been removed but is present (rates: %s)\n",
+				     ch, rate_mask_str(sad ? sad->rates : 0, buf_received, sizeof(buf_received)));
 			continue;
 		}
 
-		igt_assert_f(sad, "%dch SAD missing from ELD\n", ch);
+		sad = find_sad(&eld, ch);
+		igt_info("expected: %s, ",
+			 rate_mask_str(sad_descs[i].rates_reduced, buf_expected, sizeof(buf_expected)));
+
+		igt_assert_f(sad, "missing from ELD\n");
+
+		igt_info("received: %s\n",
+			 rate_mask_str(sad->rates, buf_received, sizeof(buf_received)));
+
 		igt_assert_f(sad->rates == sad_descs[i].rates_reduced,
-			     "%dch SAD rates 0x%x, expected 0x%x\n",
-			     ch, sad->rates, sad_descs[i].rates_reduced);
+			     "mismatch: 0x%x vs 0x%x\n",
+			     sad->rates, sad_descs[i].rates_reduced);
 	}
 
 	audio_bw_restore(drm_fd, connector);
@@ -462,11 +493,15 @@ static void hdmi_audio_bw_no_prune(int drm_fd, drmModeConnector *connector)
 	struct eld_entry eld = {};
 	const struct eld_sad *sad;
 	unsigned int i;
+	char buf_expected[64], buf_received[64];
 
 	igt_require(is_intel_device(drm_fd));
 	igt_require(eld_is_supported());
 
 	get_eld_for_mode(drm_fd, connector, &mode_standard, &eld);
+
+	igt_info("ELD SAD count: received %u, expected %u (no pruning)\n",
+		 (unsigned int)eld.sads_len, NUM_SADS);
 
 	igt_assert_eq(eld.sads_len, NUM_SADS);
 
@@ -474,10 +509,18 @@ static void hdmi_audio_bw_no_prune(int drm_fd, drmModeConnector *connector)
 		int ch = sad_descs[i].channels;
 
 		sad = find_sad(&eld, ch);
-		igt_assert_f(sad, "%dch SAD missing from ELD\n", ch);
+		igt_info("SAD[%d] %dch: expected %s, ",
+			 i, ch,
+			 rate_mask_str(sad_descs[i].rates_in, buf_expected, sizeof(buf_expected)));
+
+		igt_assert_f(sad, "missing from ELD\n");
+
+		igt_info("received %s\n",
+			 rate_mask_str(sad->rates, buf_received, sizeof(buf_received)));
+
 		igt_assert_f(sad->rates == sad_descs[i].rates_in,
-			     "%dch SAD rates 0x%x, expected 0x%x (no pruning)\n",
-			     ch, sad->rates, sad_descs[i].rates_in);
+			     "mismatch: 0x%x vs 0x%x\n",
+			     sad->rates, sad_descs[i].rates_in);
 	}
 
 	audio_bw_restore(drm_fd, connector);
