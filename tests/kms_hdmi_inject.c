@@ -318,9 +318,13 @@ build_audio_bw_edid(unsigned char raw[static AUDIO_BW_EDID_SIZE],
 	block = (struct edid_cea_data_block *)&cea_data[size];
 	size += edid_cea_data_block_set_sad(block, sads, NUM_SADS);
 
-	/* HDMI Vendor Specific Data Block (required for HDMI audio) */
+	/* HDMI Vendor Specific Data Block (required for HDMI audio).
+	 * Force 8bpc by clearing the deep-color support flags (DC_30BIT, DC_36BIT).
+	 */
 	block = (struct edid_cea_data_block *)&cea_data[size];
 	vsdb = cea_vsdb_get_hdmi_default(&vsdb_size);
+	/* Modify the VSDB to clear deep-color flags: DC_30BIT (0x10) and DC_36BIT (0x20) */
+	((struct hdmi_vsdb *)&vsdb->data.hdmi)->flags1 &= ~(HDMI_VSDB_DC_30BIT | HDMI_VSDB_DC_36BIT);
 	size += edid_cea_data_block_set_vsdb(block, vsdb, vsdb_size);
 
 	/* Speaker Allocation Data Block */
