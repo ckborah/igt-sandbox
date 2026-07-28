@@ -253,8 +253,8 @@ static drmModeModeInfo mode_reduced = {
 static drmModeModeInfo mode_standard = {
 	.clock = 119000,
 	.hdisplay = 2560, .hsync_start = 2656, .hsync_end = 2720, .htotal = 3360,
-	.vdisplay = 1080, .vsync_start = 1083, .vsync_end = 1088, .vtotal = 1122,
-	.vrefresh = 31,
+	.vdisplay = 1080, .vsync_start = 1083, .vsync_end = 1088, .vtotal = 1180,
+	.vrefresh = 30,
 	.flags = DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC,
 	.name = "2560x1080_standard",
 };
