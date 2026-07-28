@@ -49,6 +49,15 @@
  * SUBTEST: inject-audio
  * Description: Make sure that audio information exposed by ALSA match the forced
  *              EDID.
+ *
+ * SUBTEST: audio-bw-prune-reduced-blanking
+ * Description: Force a reduced-blanking 2560x1080 mode whose hblank cannot carry
+ *              high audio sample rates, and check that the kernel prunes the
+ *              affected rates from the ELD and drops SADs that lose all rates.
+ *
+ * SUBTEST: audio-bw-no-prune-standard-blanking
+ * Description: Force a standard-blanking 2560x1080 mode with ample hblank, and
+ *              check that no SAD or sample rate is pruned from the ELD.
  */
 
 #define HDISPLAY_4K	3840
@@ -70,6 +79,9 @@ IGT_TEST_DESCRIPTION("Test that in-kernel EDID parsing is producing "
  * - 4K modes exposed via KMS
  * - Audio capabilities of the monitor exposed via ALSA. EDID-Like Data (ELD)
  *   entries in /proc/asound are verified.
+ * - HDMI TMDS audio-bandwidth pruning of the ELD Short Audio Descriptors: for
+ *   a reduced-blanking mode the kernel drops the sample rates (and whole SADs)
+ *   that do not fit in the horizontal blanking.
  */
 
 /** get_connector: get the first disconnected HDMI connector */
@@ -217,6 +229,260 @@ hdmi_inject_audio(int drm_fd, drmModeConnector *connector)
 	kmstest_force_edid(drm_fd, connector, NULL);
 }
 
+/*
+ * HDMI TMDS audio-bandwidth pruning of the ELD Short Audio Descriptors.
+ *
+ * Two timings, same 2560x1080 resolution and default 8bpc RGB output:
+ *
+ *   reduced blanking : hblank=160  -> TB_blank=160 TMDS cycles/line. At >2ch a
+ *                      packet needs 32*ceil(...)+74 cycles; only 32/44.1/48 kHz
+ *                      fit, so 88.2 kHz and up are pruned.
+ *   standard blanking: hblank=864  -> TB_blank=864, everything fits.
+ *
+ * See the audio-BW algorithm in intel_audio.c (BSpec 68944).
+ */
+static drmModeModeInfo mode_reduced = {
+	.clock = 119000,
+	.hdisplay = 2560, .hsync_start = 2608, .hsync_end = 2640, .htotal = 2720,
+	.vdisplay = 1080, .vsync_start = 1083, .vsync_end = 1088, .vtotal = 1101,
+	.vrefresh = 40,
+	.flags = DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC,
+	.name = "2560x1080_reduced",
+};
+
+static drmModeModeInfo mode_standard = {
+	.clock = 230000,
+	.hdisplay = 2560, .hsync_start = 2720, .hsync_end = 2752, .htotal = 3424,
+	.vdisplay = 1080, .vsync_start = 1083, .vsync_end = 1093, .vtotal = 1120,
+	.vrefresh = 60,
+	.flags = DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC,
+	.name = "2560x1080_standard",
+};
+
+/* Only rates that igt_eld's parser recognises: 32/44.1/48/96/192 kHz. */
+#define R32  CEA_SAD_SAMPLING_RATE_32KHZ
+#define R44  CEA_SAD_SAMPLING_RATE_44KHZ
+#define R48  CEA_SAD_SAMPLING_RATE_48KHZ
+#define R96  CEA_SAD_SAMPLING_RATE_96KHZ
+#define R192 CEA_SAD_SAMPLING_RATE_192KHZ
+
+/*
+ * SADs are LPCM (igt_eld only parses LPCM) with distinct channel counts so each
+ * can be matched unambiguously in the read-back ELD.
+ */
+struct sad_desc {
+	int channels;
+	uint8_t rates_in;	/* rates advertised in the EDID */
+	uint8_t rates_reduced;	/* expected rates after pruning on mode_reduced */
+};
+
+static const struct sad_desc sad_descs[] = {
+	{ .channels = 2, .rates_in = R32 | R48 | R96 | R192, .rates_reduced = R32 | R48 | R96 | R192 },
+	{ .channels = 8, .rates_in = R48 | R96 | R192,       .rates_reduced = R48 },
+	{ .channels = 6, .rates_in = R96 | R192,             .rates_reduced = 0 /* whole SAD removed */ },
+	{ .channels = 4, .rates_in = R32 | R44 | R48,        .rates_reduced = R32 | R44 | R48 },
+};
+
+#define NUM_SADS (sizeof(sad_descs) / sizeof(sad_descs[0]))
+#define AUDIO_BW_EDID_SIZE (2 * EDID_BLOCK_SIZE)
+
+static const struct edid *
+build_audio_bw_edid(unsigned char raw[static AUDIO_BW_EDID_SIZE],
+		    drmModeModeInfo *mode)
+{
+	struct edid *edid = (struct edid *)raw;
+	struct edid_ext *ext;
+	struct edid_cea *cea;
+	char *cea_data;
+	struct edid_cea_data_block *block;
+	const struct cea_vsdb *vsdb;
+	struct cea_sad sads[NUM_SADS];
+	struct cea_speaker_alloc speaker_alloc = { .speakers = CEA_SPEAKER_FRONT_LEFT_RIGHT };
+	size_t size = 0, vsdb_size;
+	unsigned int i;
+
+	for (i = 0; i < NUM_SADS; i++)
+		cea_sad_init_pcm(&sads[i], sad_descs[i].channels,
+				 sad_descs[i].rates_in,
+				 CEA_SAD_SAMPLE_SIZE_16 | CEA_SAD_SAMPLE_SIZE_20 |
+				 CEA_SAD_SAMPLE_SIZE_24);
+
+	/* Base EDID carries the forced mode as its preferred timing. */
+	edid_init_with_mode(edid, mode);
+	edid->extensions_len = 1;
+	ext = &edid->extensions[0];
+	cea = &ext->data.cea;
+	cea_data = cea->data;
+
+	/* Short Audio Descriptor block */
+	block = (struct edid_cea_data_block *)&cea_data[size];
+	size += edid_cea_data_block_set_sad(block, sads, NUM_SADS);
+
+	/* HDMI Vendor Specific Data Block (required for HDMI audio) */
+	block = (struct edid_cea_data_block *)&cea_data[size];
+	vsdb = cea_vsdb_get_hdmi_default(&vsdb_size);
+	size += edid_cea_data_block_set_vsdb(block, vsdb, vsdb_size);
+
+	/* Speaker Allocation Data Block */
+	block = (struct edid_cea_data_block *)&cea_data[size];
+	size += edid_cea_data_block_set_speaker_alloc(block, &speaker_alloc);
+
+	igt_assert(size <= sizeof(cea->data));
+	edid_ext_set_cea(ext, size, 0, EDID_CEA_BASIC_AUDIO);
+	edid_update_checksum(edid);
+
+	return edid;
+}
+
+/* Find the forced mode in the connector's mode list. */
+static int find_mode(drmModeConnector *connector, const drmModeModeInfo *want)
+{
+	int i;
+
+	for (i = 0; i < connector->count_modes; i++) {
+		drmModeModeInfo *m = &connector->modes[i];
+
+		if (m->hdisplay == want->hdisplay &&
+		    m->vdisplay == want->vdisplay &&
+		    m->htotal == want->htotal &&
+		    m->clock == want->clock)
+			return i;
+	}
+
+	return -1;
+}
+
+static const struct eld_sad *find_sad(const struct eld_entry *eld, int channels)
+{
+	size_t i;
+
+	for (i = 0; i < eld->sads_len; i++)
+		if (eld->sads[i].channels == channels)
+			return &eld->sads[i];
+
+	return NULL;
+}
+
+/*
+ * Force the EDID + mode, modeset, and return the ELD ALSA exposes. The pipe and
+ * audio encoder must be enabled for the ELD to appear, so a framebuffer is set.
+ */
+static void get_eld_for_mode(int drm_fd, drmModeConnector *connector,
+			     drmModeModeInfo *mode, struct eld_entry *eld)
+{
+	static unsigned char raw_edid[AUDIO_BW_EDID_SIZE];
+	const struct edid *edid;
+	struct kmstest_connector_config config;
+	struct igt_fb fb;
+	int cid, mode_idx, fb_id, ret;
+
+	edid = build_audio_bw_edid(raw_edid, mode);
+	kmstest_force_edid(drm_fd, connector, edid);
+
+	igt_skip_on_f(!kmstest_force_connector(drm_fd, connector, FORCE_CONNECTOR_ON),
+		      "Could not force connector on\n");
+
+	cid = connector->connector_id;
+	connector = drmModeGetConnectorCurrent(drm_fd, cid);
+
+	mode_idx = find_mode(connector, mode);
+	igt_assert_f(mode_idx >= 0, "Forced mode %s not exposed by the kernel\n",
+		     mode->name);
+
+	ret = kmstest_get_connector_config(drm_fd, cid, -1, &config);
+	igt_assert(ret);
+
+	fb_id = igt_create_fb(drm_fd, mode->hdisplay, mode->vdisplay,
+			      DRM_FORMAT_XRGB8888, DRM_FORMAT_MOD_LINEAR, &fb);
+
+	ret = drmModeSetCrtc(drm_fd, config.crtc->crtc_id, fb_id, 0, 0,
+			     &connector->connector_id, 1,
+			     &connector->modes[mode_idx]);
+	igt_assert_eq(ret, 0);
+
+	/* ELD may appear slightly after the modeset; retry once. */
+	if (!eld_has_igt()) {
+		usleep(200 * 1000);
+		igt_assert_f(eld_has_igt(), "HDMI ELD missing after modeset\n");
+	}
+
+	igt_assert_f(eld_get_igt(eld), "Could not read back the IGT ELD\n");
+
+	igt_remove_fb(drm_fd, &fb);
+	kmstest_free_connector_config(&config);
+	drmModeFreeConnector(connector);
+}
+
+static void audio_bw_restore(int drm_fd, drmModeConnector *connector)
+{
+	kmstest_force_connector(drm_fd, connector, FORCE_CONNECTOR_UNSPECIFIED);
+	kmstest_force_edid(drm_fd, connector, NULL);
+}
+
+static void hdmi_audio_bw_prune(int drm_fd, drmModeConnector *connector)
+{
+	struct eld_entry eld = {};
+	const struct eld_sad *sad;
+	unsigned int i, expect_len = 0;
+
+	igt_require(is_intel_device(drm_fd));
+	igt_require(eld_is_supported());
+
+	get_eld_for_mode(drm_fd, connector, &mode_reduced, &eld);
+
+	for (i = 0; i < NUM_SADS; i++)
+		if (sad_descs[i].rates_reduced)
+			expect_len++;
+
+	igt_assert_eq(eld.sads_len, expect_len);
+
+	for (i = 0; i < NUM_SADS; i++) {
+		int ch = sad_descs[i].channels;
+
+		sad = find_sad(&eld, ch);
+
+		if (sad_descs[i].rates_reduced == 0) {
+			igt_assert_f(!sad,
+				     "%dch SAD should have been removed but is present\n",
+				     ch);
+			continue;
+		}
+
+		igt_assert_f(sad, "%dch SAD missing from ELD\n", ch);
+		igt_assert_f(sad->rates == sad_descs[i].rates_reduced,
+			     "%dch SAD rates 0x%x, expected 0x%x\n",
+			     ch, sad->rates, sad_descs[i].rates_reduced);
+	}
+
+	audio_bw_restore(drm_fd, connector);
+}
+
+static void hdmi_audio_bw_no_prune(int drm_fd, drmModeConnector *connector)
+{
+	struct eld_entry eld = {};
+	const struct eld_sad *sad;
+	unsigned int i;
+
+	igt_require(is_intel_device(drm_fd));
+	igt_require(eld_is_supported());
+
+	get_eld_for_mode(drm_fd, connector, &mode_standard, &eld);
+
+	igt_assert_eq(eld.sads_len, NUM_SADS);
+
+	for (i = 0; i < NUM_SADS; i++) {
+		int ch = sad_descs[i].channels;
+
+		sad = find_sad(&eld, ch);
+		igt_assert_f(sad, "%dch SAD missing from ELD\n", ch);
+		igt_assert_f(sad->rates == sad_descs[i].rates_in,
+			     "%dch SAD rates 0x%x, expected 0x%x (no pruning)\n",
+			     ch, sad->rates, sad_descs[i].rates_in);
+	}
+
+	audio_bw_restore(drm_fd, connector);
+}
+
 int igt_main()
 {
 	int drm_fd;
@@ -244,6 +510,15 @@ int igt_main()
 		     "match the forced EDID.");
 	igt_subtest("inject-audio")
 		hdmi_inject_audio(drm_fd, connector);
+
+	igt_describe("Reduced-blanking mode: high audio sample rates and "
+		     "rate-empty SADs are pruned from the ELD.");
+	igt_subtest("audio-bw-prune-reduced-blanking")
+		hdmi_audio_bw_prune(drm_fd, connector);
+
+	igt_describe("Standard-blanking mode: nothing is pruned from the ELD.");
+	igt_subtest("audio-bw-no-prune-standard-blanking")
+		hdmi_audio_bw_no_prune(drm_fd, connector);
 
 	igt_fixture() {
 		drmModeFreeConnector(connector);
