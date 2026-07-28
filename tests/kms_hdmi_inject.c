@@ -396,6 +396,7 @@ static void get_eld_for_mode(int drm_fd, drmModeConnector *connector,
 	const struct edid *edid;
 	struct kmstest_connector_config config;
 	struct igt_fb fb;
+	drmModeConnector *fresh_connector;
 	int cid, mode_idx, fb_id, ret;
 
 	edid = build_audio_bw_edid(raw_edid, mode);
@@ -405,9 +406,9 @@ static void get_eld_for_mode(int drm_fd, drmModeConnector *connector,
 		      "Could not force connector on\n");
 
 	cid = connector->connector_id;
-	connector = drmModeGetConnectorCurrent(drm_fd, cid);
+	fresh_connector = drmModeGetConnectorCurrent(drm_fd, cid);
 
-	mode_idx = find_mode(connector, mode);
+	mode_idx = find_mode(fresh_connector, mode);
 	igt_assert_f(mode_idx >= 0, "Forced mode %s not exposed by the kernel\n",
 		     mode->name);
 
@@ -418,8 +419,8 @@ static void get_eld_for_mode(int drm_fd, drmModeConnector *connector,
 			      DRM_FORMAT_XRGB8888, DRM_FORMAT_MOD_LINEAR, &fb);
 
 	ret = drmModeSetCrtc(drm_fd, config.crtc->crtc_id, fb_id, 0, 0,
-			     &connector->connector_id, 1,
-			     &connector->modes[mode_idx]);
+			     &fresh_connector->connector_id, 1,
+			     &fresh_connector->modes[mode_idx]);
 	igt_assert_eq(ret, 0);
 
 	/* ELD may appear slightly after the modeset; retry once. */
@@ -432,7 +433,7 @@ static void get_eld_for_mode(int drm_fd, drmModeConnector *connector,
 
 	igt_remove_fb(drm_fd, &fb);
 	kmstest_free_connector_config(&config);
-	drmModeFreeConnector(connector);
+	drmModeFreeConnector(fresh_connector);
 }
 
 static void audio_bw_restore(int drm_fd, drmModeConnector *connector)
