@@ -220,6 +220,16 @@
  *              updated accordignly
  */
 
+/**
+ * SUBTEST: cursor-scroll-crc-%dx%d
+ * Description: Move a cursor of the given size across the screen over a
+ *              pattern background on the primary plane, and check that the
+ *              resulting CRC changes with position and is reproducible.
+ *
+ * arg[1].values: 64, 128, 256, 512
+ * arg[2].values: 64, 128, 256, 512
+ */
+
 #if defined(__x86_64__) || defined(__i386__)
 #define cpu_relax()	__builtin_ia32_pause()
 #else
@@ -1809,6 +1819,170 @@ static void flip_vs_cursor_busy_crc(igt_display_t *display, bool atomic)
 	put_ahnd(ahnd);
 }
 
+/*
+ * Fill positions[] with cursor offsets covering the axis in increments of
+ * cursor_size, from 0 up to the true edge (extent - cursor_size) inclusive.
+ * If that edge isn't a multiple of cursor_size, an extra final position is
+ * appended so the last row/column/step still lands exactly on the edge
+ * instead of stopping short. Returns the number of positions written.
+ */
+static int cursor_axis_positions(int extent, int cursor_size,
+				  int *positions, int max_positions)
+{
+	int last = extent - cursor_size;
+	int n = 0;
+	int pos;
+
+	for (pos = 0; pos <= last; pos += cursor_size) {
+		igt_assert(n < max_positions);
+		positions[n++] = pos;
+	}
+
+	if (n == 0 || positions[n - 1] != last) {
+		igt_assert(n < max_positions);
+		positions[n++] = last;
+	}
+
+	return n;
+}
+
+/*
+ * Move the cursor along one axis through the given positions[] (the other
+ * axis held fixed at "fixed"), recording a CRC at each step, then repeat
+ * the same sweep and check the CRCs are reproducible.
+ */
+static void scroll_axis_crc(int drm_fd, igt_pipe_crc_t *crc,
+			    struct drm_mode_cursor *arg,
+			    const int *positions, int nsteps,
+			    bool vary_x, int fixed, const char *direction)
+{
+	igt_crc_t crc_ref[nsteps], crc_test;
+	int i;
+
+	for (i = 0; i < nsteps; i++) {
+		if (vary_x) {
+			arg->x = positions[i];
+			arg->y = fixed;
+		} else {
+			arg->x = fixed;
+			arg->y = positions[i];
+		}
+
+		do_ioctl(drm_fd, DRM_IOCTL_MODE_CURSOR, arg);
+		igt_pipe_crc_collect_crc(crc, &crc_ref[i]);
+
+		if (i > 0 && igt_check_crc_equal(&crc_ref[i - 1], &crc_ref[i]))
+			igt_info("%s scroll: CRC did not change between position %d and %d\n",
+				 direction, i - 1, i);
+	}
+
+	for (i = 0; i < nsteps; i++) {
+		if (vary_x) {
+			arg->x = positions[i];
+			arg->y = fixed;
+		} else {
+			arg->x = fixed;
+			arg->y = positions[i];
+		}
+
+		do_ioctl(drm_fd, DRM_IOCTL_MODE_CURSOR, arg);
+		igt_pipe_crc_collect_crc(crc, &crc_test);
+
+		if (!igt_check_crc_equal(&crc_ref[i], &crc_test))
+			igt_info("%s scroll: CRC mismatch at position %d (x=%d, y=%d)\n",
+				 direction, i, arg->x, arg->y);
+	}
+}
+
+static void cursor_scroll_crc(igt_display_t *display, int cursor_width, int cursor_height)
+{
+	struct drm_mode_cursor arg;
+	struct igt_fb fb_info, cursor_fb;
+	igt_crtc_t *crtc;
+	igt_output_t *output;
+	igt_plane_t *cursor;
+	uint64_t max_width, max_height;
+	int i, nsteps_x, nsteps_y, max_positions_x, max_positions_y;
+
+	crtc = find_connected_pipe(display, false, &output);
+	igt_require(output);
+
+	igt_info("Using pipe %s & %s\n",
+		 igt_crtc_name(crtc), igt_output_name(output));
+
+	do_or_die(drmGetCap(display->drm_fd, DRM_CAP_CURSOR_WIDTH, &max_width));
+	do_or_die(drmGetCap(display->drm_fd, DRM_CAP_CURSOR_HEIGHT, &max_height));
+	igt_require(cursor_width <= max_width && cursor_height <= max_height);
+
+	/* Pattern background on the primary plane. */
+	set_fb_on_crtc(display, crtc, output, &fb_info);
+
+	igt_create_color_fb(display->drm_fd, cursor_width, cursor_height, DRM_FORMAT_ARGB8888,
+			    DRM_FORMAT_MOD_LINEAR, 1., 1., 1., &cursor_fb);
+
+	igt_display_commit2(display, display->is_atomic ? COMMIT_ATOMIC : COMMIT_LEGACY);
+
+	pipe_crc = igt_crtc_crc_new(crtc, IGT_PIPE_CRC_SOURCE_AUTO);
+
+	cursor = set_cursor_on_crtc(display, crtc, &cursor_fb);
+	igt_display_commit2(display, COMMIT_UNIVERSAL);
+
+	memset(&arg, 0, sizeof(arg));
+	arg.crtc_id = crtc->crtc_id;
+	arg.flags = DRM_MODE_CURSOR_MOVE;
+	arg.width = cursor_fb.width;
+	arg.height = cursor_fb.height;
+	arg.handle = cursor_fb.gem_handle;
+
+	/*
+	 * Cursor-sized increments that fit across each axis, plus a possible
+	 * extra position so the true screen edge is always reached even
+	 * when it isn't a multiple of the cursor size.
+	 */
+	max_positions_x = fb_info.width / cursor_fb.width + 2;
+	max_positions_y = fb_info.height / cursor_fb.height + 2;
+
+	{
+	int xpos[max_positions_x], ypos[max_positions_y];
+
+	nsteps_x = cursor_axis_positions(fb_info.width, cursor_fb.width,
+					  xpos, max_positions_x);
+	nsteps_y = cursor_axis_positions(fb_info.height, cursor_fb.height,
+					  ypos, max_positions_y);
+	igt_require(nsteps_x > 1 && nsteps_y > 1);
+
+	igt_pipe_crc_start(pipe_crc);
+
+	/*
+	 * Horizontal scroll across every row, including the final partial
+	 * row, covering the whole screen down to its true bottom edge.
+	 */
+	for (i = 0; i < nsteps_y; i++)
+		scroll_axis_crc(display->drm_fd, pipe_crc, &arg,
+				xpos, nsteps_x, true, ypos[i], "horizontal");
+
+	/*
+	 * Vertical scroll across every column, including the final partial
+	 * column, covering the whole screen out to its true right edge.
+	 */
+	for (i = 0; i < nsteps_x; i++)
+		scroll_axis_crc(display->drm_fd, pipe_crc, &arg,
+				ypos, nsteps_y, false, xpos[i], "vertical");
+	}
+
+	igt_pipe_crc_stop(pipe_crc);
+
+	/* Clean-up */
+	igt_plane_set_fb(igt_output_get_plane_type(output, DRM_PLANE_TYPE_PRIMARY),
+			 NULL);
+	igt_plane_set_fb(cursor, NULL);
+	igt_output_set_crtc(output, NULL);
+	igt_display_commit2(display, display->is_atomic ? COMMIT_ATOMIC : COMMIT_LEGACY);
+
+	igt_remove_fb(display->drm_fd, &fb_info);
+	igt_remove_fb(display->drm_fd, &cursor_fb);
+}
+
 static void modeset_atomic_cursor_hotspot(igt_display_t *display)
 {
 	struct igt_fb cursor_fb;
@@ -2055,6 +2229,22 @@ int igt_main()
 
 		igt_subtest("flip-vs-cursor-busy-crc-atomic")
 			flip_vs_cursor_busy_crc(&display, true);
+	}
+
+	igt_describe("Move a cursor of the given size across the screen over a pattern "
+		     "background on the primary plane, and check the CRC");
+	igt_subtest_group() {
+		const int cursor_sizes[] = { 64, 128, 256, 512 };
+
+		igt_fixture() {
+			igt_require_pipe_crc(display.drm_fd);
+			igt_display_require_output(&display);
+		}
+
+		for (i = 0; i < ARRAY_SIZE(cursor_sizes); i++)
+			igt_subtest_f("cursor-scroll-crc-%dx%d",
+				      cursor_sizes[i], cursor_sizes[i])
+				cursor_scroll_crc(&display, cursor_sizes[i], cursor_sizes[i]);
 	}
 
 	igt_describe("Adds variety of tests:\n"
