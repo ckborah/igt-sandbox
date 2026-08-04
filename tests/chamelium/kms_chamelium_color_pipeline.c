@@ -40,50 +40,15 @@
  *
  * arg[1]:
  *
- * @yuv601-rgb601:		YUV BT.601 to RGB BT.601
- * @yuv709-rgb709:		YUV BT.709 to RGB BT.709
- * @yuv2020-rgb2020:		YUV BT.2020 to RGB BT.2020
- * @rgb709-rgb2020:		RGB BT.709 to RGB BT.2020
- */
-
-/**
- * SUBTEST: plane-fixed-matrix-lut1d-%s
- * Description: Test FIXED_MATRIX + 1D LUT pipeline: %arg[1].
- *
- * arg[1]:
- *
- * @yuv601-rgb601:		YUV BT.601 to RGB BT.601
- * @yuv709-rgb709:		YUV BT.709 to RGB BT.709
- * @yuv2020-rgb2020:		YUV BT.2020 to RGB BT.2020
- */
-
-/**
- * SUBTEST: plane-lut1d-fixed-matrix-lut1d-%s
- * Description: Test 1D LUT + FIXED_MATRIX + 1D LUT pipeline: %arg[1].
- *
- * arg[1]:
- *
- * @rgb709-rgb2020:		RGB BT.709 to RGB BT.2020
- */
-
-/**
- * SUBTEST: plane-yuv-range-correct-%s
- * Description: Test YCbCr range correction colorop: %arg[1].
- *
- * arg[1]:
- *
- * @yuv-lim:			YCbCr limited range (conversion active)
- */
-
-/**
- * SUBTEST: plane-yuv-range-correct-fixed-matrix-%s
- * Description: Test YCbCr range correction + FIXED_MATRIX pipeline: %arg[1].
- *
- * arg[1]:
- *
- * @bt601-yuv-lim:		YCbCr BT.601 limited range with CSC
- * @bt709-yuv-lim:		YCbCr BT.709 limited range with CSC
- * @bt2020-yuv-lim:		YCbCr BT.2020 limited range with CSC
+ * @yuv-rgb-bt601:		YUV BT.601 full range to RGB BT.601
+ * @yuv-rgb-bt709:		YUV BT.709 full range to RGB BT.709
+ * @yuv-rgb-bt2020:		YUV BT.2020 full range to RGB BT.2020
+ * @yuv-rgb-bt601-lim:		YUV BT.601 limited range to RGB BT.601
+ * @yuv-rgb-bt709-lim:		YUV BT.709 limited range to RGB BT.709
+ * @yuv-rgb-bt2020-lim:	YUV BT.2020 limited range to RGB BT.2020
+ * @yuv-rgb-bt601-lut1d:	YUV BT.601 full range to RGB BT.601, then 1D LUT
+ * @yuv-rgb-bt709-lut1d:	YUV BT.709 full range to RGB BT.709, then 1D LUT
+ * @yuv-rgb-bt2020-lut1d:	YUV BT.2020 full range to RGB BT.2020, then 1D LUT
  */
 
 IGT_TEST_DESCRIPTION("Test to validate DRM plane color pipeline using Chamelium frame capture instead of pipe CRC");
@@ -533,15 +498,20 @@ run_tests_for_fixed_matrix(data_t *data)
 		.name = "FIXED_MATRIX YUV2020 to RGB2020",
 		.fixed_matrix_info = { .fixed_matrix = KMS_COLOROP_FIXED_MATRIX_YCBCR2020_NC_FULL_RGB },
 	};
-	kms_colorop_t fixed_matrix_rgb709_rgb2020 = {
+	kms_colorop_t fixed_matrix_yuv601_rgb601_lim = {
 		.type = KMS_COLOROP_FIXED_MATRIX,
-		.name = "FIXED_MATRIX RGB709 to RGB2020",
-		.fixed_matrix_info = { .fixed_matrix = KMS_COLOROP_FIXED_MATRIX_RGB709_RGB2020 },
+		.name = "FIXED_MATRIX YUV601 limited to RGB601",
+		.fixed_matrix_info = { .fixed_matrix = KMS_COLOROP_FIXED_MATRIX_YCBCR601_LIMITED_RGB },
 	};
-	kms_colorop_t fixed_matrix_ycbcr_limited_full = {
+	kms_colorop_t fixed_matrix_yuv709_rgb709_lim = {
 		.type = KMS_COLOROP_FIXED_MATRIX,
-		.name = "FIXED_MATRIX YCbCr limited to full",
-		.fixed_matrix_info = { .fixed_matrix = KMS_COLOROP_FIXED_MATRIX_YCBCR_LIMITED_FULL },
+		.name = "FIXED_MATRIX YUV709 limited to RGB709",
+		.fixed_matrix_info = { .fixed_matrix = KMS_COLOROP_FIXED_MATRIX_YCBCR709_LIMITED_RGB },
+	};
+	kms_colorop_t fixed_matrix_yuv2020_rgb2020_lim = {
+		.type = KMS_COLOROP_FIXED_MATRIX,
+		.name = "FIXED_MATRIX YUV2020 limited to RGB2020",
+		.fixed_matrix_info = { .fixed_matrix = KMS_COLOROP_FIXED_MATRIX_YCBCR2020_NC_LIMITED_RGB },
 	};
 
 	struct {
@@ -553,7 +523,7 @@ run_tests_for_fixed_matrix(data_t *data)
 		enum igt_color_encoding encoding;
 		enum igt_color_range range;
 	} fixed_matrix_tests[] = {
-		{ .name = "yuv601-rgb601",
+		{ .name = "yuv-rgb-bt601",
 		  .subtest_prefix = "plane-fixed-matrix",
 		  .fb_colors = colors_rgb,
 		  .colorops = { &fixed_matrix_yuv601_rgb601, NULL },
@@ -561,7 +531,7 @@ run_tests_for_fixed_matrix(data_t *data)
 		  .encoding = IGT_COLOR_YCBCR_BT601,
 		  .range = IGT_COLOR_YCBCR_FULL_RANGE,
 		},
-		{ .name = "yuv709-rgb709",
+		{ .name = "yuv-rgb-bt709",
 		  .subtest_prefix = "plane-fixed-matrix",
 		  .fb_colors = colors_rgb,
 		  .colorops = { &fixed_matrix_yuv709_rgb709, NULL },
@@ -569,7 +539,7 @@ run_tests_for_fixed_matrix(data_t *data)
 		  .encoding = IGT_COLOR_YCBCR_BT709,
 		  .range = IGT_COLOR_YCBCR_FULL_RANGE,
 		},
-		{ .name = "yuv2020-rgb2020",
+		{ .name = "yuv-rgb-bt2020",
 		  .subtest_prefix = "plane-fixed-matrix",
 		  .fb_colors = colors_rgb,
 		  .colorops = { &fixed_matrix_yuv2020_rgb2020, NULL },
@@ -577,70 +547,50 @@ run_tests_for_fixed_matrix(data_t *data)
 		  .encoding = IGT_COLOR_YCBCR_BT2020,
 		  .range = IGT_COLOR_YCBCR_FULL_RANGE,
 		},
-		{ .name = "rgb709-rgb2020",
+		{ .name = "yuv-rgb-bt601-lut1d",
 		  .subtest_prefix = "plane-fixed-matrix",
-		  .fb_colors = colors_rgb,
-		  .colorops = { &fixed_matrix_rgb709_rgb2020, NULL },
-		  .input_format = DRM_FORMAT_XRGB8888,
-		},
-		{ .name = "yuv601-rgb601",
-		  .subtest_prefix = "plane-fixed-matrix-lut1d",
 		  .fb_colors = colors_rgb,
 		  .colorops = { &fixed_matrix_yuv601_rgb601, &lut1d_linear, NULL },
 		  .input_format = DRM_FORMAT_YUYV,
 		  .encoding = IGT_COLOR_YCBCR_BT601,
 		  .range = IGT_COLOR_YCBCR_FULL_RANGE,
 		},
-		{ .name = "yuv709-rgb709",
-		  .subtest_prefix = "plane-fixed-matrix-lut1d",
+		{ .name = "yuv-rgb-bt709-lut1d",
+		  .subtest_prefix = "plane-fixed-matrix",
 		  .fb_colors = colors_rgb,
 		  .colorops = { &fixed_matrix_yuv709_rgb709, &lut1d_linear, NULL },
 		  .input_format = DRM_FORMAT_YUYV,
 		  .encoding = IGT_COLOR_YCBCR_BT709,
 		  .range = IGT_COLOR_YCBCR_FULL_RANGE,
 		},
-		{ .name = "yuv2020-rgb2020",
-		  .subtest_prefix = "plane-fixed-matrix-lut1d",
+		{ .name = "yuv-rgb-bt2020-lut1d",
+		  .subtest_prefix = "plane-fixed-matrix",
 		  .fb_colors = colors_rgb,
 		  .colorops = { &fixed_matrix_yuv2020_rgb2020, &lut1d_linear, NULL },
 		  .input_format = DRM_FORMAT_YUYV,
 		  .encoding = IGT_COLOR_YCBCR_BT2020,
 		  .range = IGT_COLOR_YCBCR_FULL_RANGE,
 		},
-		{ .name = "rgb709-rgb2020",
-		  .subtest_prefix = "plane-lut1d-fixed-matrix-lut1d",
+		{ .name = "yuv-rgb-bt601-lim",
+		  .subtest_prefix = "plane-fixed-matrix",
 		  .fb_colors = colors_rgb,
-		  .colorops = { &lut1d_linear, &fixed_matrix_rgb709_rgb2020, &lut1d_linear, NULL },
-		  .input_format = DRM_FORMAT_XRGB8888,
-		},
-		{ .name = "yuv-lim",
-		  .subtest_prefix = "plane-yuv-range-correct",
-		  .fb_colors = colors_rgb,
-		  .colorops = { &fixed_matrix_ycbcr_limited_full, NULL },
-		  .input_format = DRM_FORMAT_YUYV,
-		  .encoding = IGT_COLOR_YCBCR_BT709,
-		  .range = IGT_COLOR_YCBCR_LIMITED_RANGE,
-		},
-		{ .name = "bt601-yuv-lim",
-		  .subtest_prefix = "plane-yuv-range-correct-fixed-matrix",
-		  .fb_colors = colors_rgb,
-		  .colorops = { &fixed_matrix_ycbcr_limited_full, &fixed_matrix_yuv601_rgb601, NULL },
+		  .colorops = { &fixed_matrix_yuv601_rgb601_lim, NULL },
 		  .input_format = DRM_FORMAT_YUYV,
 		  .encoding = IGT_COLOR_YCBCR_BT601,
 		  .range = IGT_COLOR_YCBCR_LIMITED_RANGE,
 		},
-		{ .name = "bt709-yuv-lim",
-		  .subtest_prefix = "plane-yuv-range-correct-fixed-matrix",
+		{ .name = "yuv-rgb-bt709-lim",
+		  .subtest_prefix = "plane-fixed-matrix",
 		  .fb_colors = colors_rgb,
-		  .colorops = { &fixed_matrix_ycbcr_limited_full, &fixed_matrix_yuv709_rgb709, NULL },
+		  .colorops = { &fixed_matrix_yuv709_rgb709_lim, NULL },
 		  .input_format = DRM_FORMAT_YUYV,
 		  .encoding = IGT_COLOR_YCBCR_BT709,
 		  .range = IGT_COLOR_YCBCR_LIMITED_RANGE,
 		},
-		{ .name = "bt2020-yuv-lim",
-		  .subtest_prefix = "plane-yuv-range-correct-fixed-matrix",
+		{ .name = "yuv-rgb-bt2020-lim",
+		  .subtest_prefix = "plane-fixed-matrix",
 		  .fb_colors = colors_rgb,
-		  .colorops = { &fixed_matrix_ycbcr_limited_full, &fixed_matrix_yuv2020_rgb2020, NULL },
+		  .colorops = { &fixed_matrix_yuv2020_rgb2020_lim, NULL },
 		  .input_format = DRM_FORMAT_YUYV,
 		  .encoding = IGT_COLOR_YCBCR_BT2020,
 		  .range = IGT_COLOR_YCBCR_LIMITED_RANGE,
