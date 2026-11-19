@@ -31,6 +31,7 @@
  * @lut1d-lut1d:		1D LUT --> 1D LUT
  * @lut1d-ctm3x4-lut1d:		1D LUT --> 3X4 CTM --> 1D LUT
  * @lut3d-green-only:		3D LUT
+ * @lut3d-step:		3D LUT (step, checks entry order)
  */
 
 IGT_TEST_DESCRIPTION("Test DRM colorops at plane level");
@@ -82,6 +83,50 @@ static bool ctm_colorop_only(kms_colorop_t *colorops[])
 	}
 
 	return true;
+}
+
+static bool has_lut3d_colorop(kms_colorop_t *colorops[])
+{
+	int i;
+
+	for (i = 0; colorops[i]; i++) {
+		if (colorops[i]->type == KMS_COLOROP_LUT3D)
+			return true;
+	}
+
+	return false;
+}
+
+/*
+ * Fill a 17x17x17 3D LUT in the uAPI order, with red as the fastest
+ * axis: index = r + 17 * (g + 17 * b). Each channel is a step: 0.0 for
+ * the lower half of the nodes and 1.0 for the upper half.
+ *
+ * For fully saturated or zero inputs this behaves like an identity, but
+ * all nodes around the input carry the same value, so the output stays
+ * exact even when the input does not land exactly on a node.
+ *
+ * If the driver loads the entries in a different order than the hardware
+ * walks them, the table turns into a channel swap. With the hardware
+ * walking blue fastest, a solid red band comes out blue and vice versa.
+ */
+static void fill_lut3d_step(igt_3dlut_t *lut3d)
+{
+	const int n = 17;
+	int r, g, b;
+
+	for (b = 0; b < n; b++) {
+		for (g = 0; g < n; g++) {
+			for (r = 0; r < n; r++) {
+				struct igt_color_lut_float *e =
+					&lut3d->lut[r + n * (g + n * b)];
+
+				e->red = r >= n / 2 ? 1.0 : 0.0;
+				e->green = g >= n / 2 ? 1.0 : 0.0;
+				e->blue = b >= n / 2 ? 1.0 : 0.0;
+			}
+		}
+	}
 }
 
 static void
@@ -170,7 +215,11 @@ static void _test_plane_colorops(data_t *data,
 
 	set_color_pipeline(display, plane, colorops, color_pipeline);
 
-	if (ctm_colorop_only(colorops) || is_yuv)
+	/*
+	 * Solid colors for 3D LUTs keep every pixel on a LUT node, so the
+	 * output is exact and comparable against the solid reference.
+	 */
+	if (ctm_colorop_only(colorops) || is_yuv || has_lut3d_colorop(colorops))
 		paint_rectangles(data, mode, fb_colors, &fb);
 	else
 		paint_gradient_rectangles(data, mode, fb_colors, &fb);
@@ -179,6 +228,8 @@ static void _test_plane_colorops(data_t *data,
 	igt_display_commit_atomic(&data->display, 0, NULL);
 	igt_wait_for_vblank(plane->crtc);
 	igt_pipe_crc_collect_crc(data->pipe_crc, &crc_pipe);
+
+	igt_debug_wait_for_keypress("color-pipeline");
 
 	/* Cleanup before assert so failed plane doesn't affect next plane */
 	igt_plane_set_color_pipeline(plane, NULL);
@@ -279,6 +330,17 @@ run_tests_for_plane(data_t *data)
 		.name = "3dlut passing only green channel (RGB order)",
 		.transform = NULL,
 	};
+	static igt_3dlut_t lut3d_step_table;
+	kms_colorop_t lut3d_step = {
+		.type = KMS_COLOROP_LUT3D,
+		.lut3d = &lut3d_step_table,
+		.lut3d_info = {
+			.size = 17,
+			.interpolation = DRM_COLOROP_LUT3D_INTERPOLATION_TETRAHEDRAL,
+		},
+		.name = "3dlut step (RGB order)",
+		.transform = NULL,
+	};
 	kms_colorop_t ctm_3x4 = {
 		.type = KMS_COLOROP_CTM_3X4,
 		.name = "CTM 3X4 (red to blue)",
@@ -341,7 +403,14 @@ run_tests_for_plane(data_t *data)
 		  .exp_colors = colors_only_green,
 		  .colorops = { &lut3d, NULL },
 		},
+		{ .name = "lut3d-step",
+		  .fb_colors = colors_rgb,
+		  .exp_colors = colors_rgb,
+		  .colorops = { &lut3d_step, NULL },
+		},
 	};
+
+	fill_lut3d_step(&lut3d_step_table);
 
 	for (int i = 0; i < ARRAY_SIZE(plane_colorops_tests); i++) {
 		igt_describe_f("Test plane color pipeline with colorops: %s", plane_colorops_tests[i].name);
